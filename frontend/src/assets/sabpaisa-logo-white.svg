@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 50">
+  <text x="5" y="36" font-family="DM Sans, Inter, sans-serif" font-size="32" font-weight="700">
+    <tspan fill="#ffffff">Sab</tspan><tspan fill="#ffcc80">Paisa</tspan>
+  </text>
+  <text x="5" y="48" font-family="Inter, sans-serif" font-size="8" fill="rgba(255,255,255,0.7)" letter-spacing="1.5">
+    TEST CASE MANAGEMENT
+  </text>
+</svg>

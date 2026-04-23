@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tcm_user
+      POSTGRES_PASSWORD: tcm_pass
+      POSTGRES_DB: tcm_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tcm_user -d tcm_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tcm_user:tcm_pass@db:5432/tcm_db
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:80}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      BITBUCKET_BASE_URL: ${BITBUCKET_BASE_URL:-}
+      BITBUCKET_API_TOKEN: ${BITBUCKET_API_TOKEN:-}
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
