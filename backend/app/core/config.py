@@ -1,8 +1,28 @@
 """Application configuration using pydantic-settings."""
 
+import logging
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+
+# Known placeholder / demo values that must never be used in production.
+# Any SECRET_KEY containing one of these substrings (case-insensitive) is
+# treated as unsafe.
+_UNSAFE_SECRET_MARKERS = (
+    "change-me",
+    "your-secret",
+    "dev-secret",
+    "example",
+    "placeholder",
+)
+
+# Minimum acceptable length for a production SECRET_KEY. Matches the
+# output of ``openssl rand -hex 32``.
+_MIN_SECRET_KEY_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -44,6 +64,45 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
+
+    @model_validator(mode="after")
+    def _validate_secret_key(self) -> "Settings":
+        """Reject placeholder / too-short SECRET_KEY values.
+
+        Production mode (``DEBUG=false``) fails hard at boot. Dev mode
+        (``DEBUG=true``) logs a warning but allows the app to start so
+        local onboarding isn't blocked on day one.
+        """
+        problems = self._secret_key_problems()
+        if not problems:
+            return self
+        msg = (
+            "SECRET_KEY is not safe for production: "
+            + "; ".join(problems)
+            + ". Generate a strong value with `openssl rand -hex 32` and set "
+            "it via the SECRET_KEY env var (or .env file)."
+        )
+        if self.DEBUG:
+            logger.warning("insecure_secret_key_dev_only", extra={"problems": problems})
+            return self
+        raise ValueError(msg)
+
+    def _secret_key_problems(self) -> list[str]:
+        problems: list[str] = []
+        value = (self.SECRET_KEY or "").strip()
+        if not value:
+            problems.append("value is empty")
+            return problems
+        if len(value) < _MIN_SECRET_KEY_LENGTH:
+            problems.append(
+                f"length {len(value)} < required {_MIN_SECRET_KEY_LENGTH}"
+            )
+        lowered = value.lower()
+        for marker in _UNSAFE_SECRET_MARKERS:
+            if marker in lowered:
+                problems.append(f"contains placeholder marker '{marker}'")
+                break
+        return problems
 
 
 @lru_cache
