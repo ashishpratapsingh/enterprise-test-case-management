@@ -438,6 +438,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # In DEBUG (local dev) skip limiting entirely — React StrictMode
+        # doubles every useEffect call which makes the Dashboard burst
+        # trip the limiter on hot reload.
+        if settings.DEBUG:
+            return await call_next(request)
+
         client_ip = request.client.host if request.client else "unknown"
         bucket = self.buckets[client_ip]
 

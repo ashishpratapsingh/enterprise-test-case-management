@@ -552,7 +552,12 @@ const TestRunsPage: React.FC = () => {
         ),
     },
     {
-      field: 'creator',
+      // Point field at the primitive `created_by` UUID so AG Grid doesn't
+      // infer an "object" cell type from the full nested `creator` user
+      // object the backend returns. The cell renderer still reads from
+      // creator.full_name on the row — the field is only used for
+      // sorting/filtering/type inference by AG Grid.
+      field: 'created_by',
       headerName: 'Created By',
       width: 130,
       renderCell: (params) => params.row?.creator?.full_name || '—',

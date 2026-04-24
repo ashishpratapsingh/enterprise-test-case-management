@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import projectService from '../services/projectService';
+import authService from '../services/authService';
 
 export interface ProjectOption {
   id: string;
@@ -32,6 +33,15 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [loading, setLoading] = useState(true);
 
   const refreshProjects = useCallback(async () => {
+    // Avoid firing an unauthenticated /projects request on the /login and
+    // password-reset routes — the backend would 401 and the response would
+    // show up as a red error in the console. Pages that need projects are
+    // behind ProtectedRoute, so by the time they render the user is logged
+    // in and this context will already have refreshed.
+    if (!authService.isAuthenticated()) {
+      setLoading(false);
+      return;
+    }
     try {
       const res = await projectService.getAll({ pageSize: 100 });
       const apiData = (res as any)?.data;

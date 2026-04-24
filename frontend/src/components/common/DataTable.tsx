@@ -233,8 +233,13 @@ const DataTable: React.FC<DataTableProps> = ({
           pagination={false}
           suppressPaginationPanel
           onRowClicked={onRowClicked}
-          rowSelection={checkboxSelection ? 'multiple' : undefined}
-          suppressRowClickSelection
+          rowSelection={
+            // AG Grid v32+ object form. `enableClickSelection: false`
+            // replaces the deprecated top-level `suppressRowClickSelection`.
+            checkboxSelection
+              ? { mode: 'multiRow', enableClickSelection: false }
+              : undefined
+          }
           animateRows
           domLayout="normal"
           getRowStyle={getRowStyle}

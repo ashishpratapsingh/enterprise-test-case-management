@@ -41,13 +41,15 @@ class TestCaseService:
     async def get_test_case(self, test_case_id: uuid.UUID) -> Any:
         """Get a test case by its primary key.
 
+        Returns a wire-safe serialized dict with slim assignee/creator
+        relationships (no password hashes leaked).
+
         Raises:
             NotFoundError: If the test case does not exist.
         """
-        tc = await self.tc_repo.get_by_id(test_case_id)
+        tc = await self.tc_repo.get_by_id_enriched(test_case_id)
         if tc is None:
             raise NotFoundError(f"Test case with id '{test_case_id}' not found")
-        await self.session.refresh(tc, ["assignee"])
         return tc
 
     async def get_test_case_by_test_case_id(self, test_case_id: str) -> Any:

@@ -1,11 +1,34 @@
 """Repository for TestSuite entity operations."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.repositories.base import BaseRepository
+
+
+def _safe_user(user: Any) -> dict | None:
+    """Return only public User fields — never leak password hashes or
+    reset tokens through nested relationships."""
+    if user is None:
+        return None
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+    }
+
+
+def _safe_suite_case(sc: Any) -> dict:
+    """Slim view of a TestSuiteCase association row used by list responses."""
+    return {
+        "id": getattr(sc, "id", None),
+        "test_suite_id": sc.test_suite_id,
+        "test_case_id": sc.test_case_id,
+        "order": getattr(sc, "order", None),
+    }
 
 
 class TestSuiteRepository(BaseRepository):
@@ -15,6 +38,24 @@ class TestSuiteRepository(BaseRepository):
         from app.models.test_suite import TestSuite
 
         super().__init__(TestSuite, session)
+
+    def _serialize(self, item: Any) -> dict:
+        return {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "project_id": item.project_id,
+            "release_id": item.release_id,
+            "is_active": item.is_active,
+            "created_by": item.created_by,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "is_deleted": item.is_deleted,
+            "creator": _safe_user(getattr(item, "creator", None)),
+            "test_suite_cases": [
+                _safe_suite_case(sc) for sc in getattr(item, "test_suite_cases", []) or []
+            ],
+        }
 
     async def get_all(self, **kwargs) -> tuple[list, int]:
         """Override to eagerly load test_suite_cases, excluding deleted test cases."""
@@ -30,7 +71,7 @@ class TestSuiteRepository(BaseRepository):
                 if tc and not getattr(tc, 'is_deleted', False):
                     valid_cases.append(sc)
             item.test_suite_cases = valid_cases
-        return items, total
+        return [self._serialize(i) for i in items], total
 
     async def get_by_project(self, project_id: uuid.UUID) -> list:
         """Get all test suites belonging to a project."""
