@@ -61,6 +61,19 @@ class Settings(BaseSettings):
     BITBUCKET_BASE_URL: str | None = None
     BITBUCKET_API_TOKEN: str | None = None
 
+    # Mail — "console" writes emails to the logger (dev default); "smtp"
+    # actually delivers via an SMTP relay.
+    MAIL_BACKEND: str = "console"
+    MAIL_FROM: str = "noreply@tcm.local"
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_USE_TLS: bool = True
+
+    # Public-facing URL used to build links inside emails (e.g. password-reset).
+    APP_BASE_URL: str = "http://localhost:3000"
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"

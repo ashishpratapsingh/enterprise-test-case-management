@@ -51,10 +51,13 @@ describe('ForgotPasswordPage', () => {
     expect(await screen.findByText(/reset link has been issued/i)).toBeInTheDocument();
   });
 
-  it('shows a dev-mode reset link when the backend returns reset_token', async () => {
+  it('never surfaces a reset_token even when the backend accidentally returns one', async () => {
+    // Defence-in-depth: the frontend must not render the token even if the
+    // backend regresses and starts echoing it. The only post-submit UI is
+    // the generic success alert plus a Back-to-Login button.
     authService.requestPasswordReset.mockResolvedValue({
       message: 'ok',
-      reset_token: 'devtoken-xyz',
+      reset_token: 'should-never-be-rendered',
     });
 
     render(
@@ -68,11 +71,9 @@ describe('ForgotPasswordPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /send reset link/i }));
 
-    await waitFor(() => {
-      expect(authService.requestPasswordReset).toHaveBeenCalled();
-    });
-    const link = await screen.findByRole('link', { name: /reset-password\?token=devtoken-xyz/i });
-    expect(link).toHaveAttribute('href', '/reset-password?token=devtoken-xyz');
+    await screen.findByText(/reset link has been issued/i);
+    expect(screen.queryByText(/should-never-be-rendered/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/dev mode/i)).not.toBeInTheDocument();
   });
 
   it('shows an error alert when the service rejects', async () => {

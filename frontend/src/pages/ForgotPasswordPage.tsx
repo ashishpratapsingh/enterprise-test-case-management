@@ -19,19 +19,17 @@ const ForgotPasswordPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [devResetLink, setDevResetLink] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const result = await authService.requestPasswordReset(email);
+      await authService.requestPasswordReset(email);
+      // Backend always returns the generic "if registered…" message to
+      // avoid user enumeration; the real reset link arrives via email
+      // (ConsoleMailBackend in dev prints it to the backend log).
       setSubmitted(true);
-      // Dev affordance: the backend echoes the token only when DEBUG=true.
-      if (result?.reset_token) {
-        setDevResetLink(`/reset-password?token=${encodeURIComponent(result.reset_token)}`);
-      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Something went wrong. Try again.');
     } finally {
@@ -64,16 +62,6 @@ const ForgotPasswordPage: React.FC = () => {
               <Alert severity="success" sx={{ mb: 2, borderRadius: 2 }}>
                 If that email is registered, a reset link has been issued. Check your inbox.
               </Alert>
-              {devResetLink && (
-                <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
-                  <Typography variant="caption" display="block" fontWeight={600}>
-                    Dev mode — open the reset link directly:
-                  </Typography>
-                  <Link component={RouterLink} to={devResetLink}>
-                    {devResetLink}
-                  </Link>
-                </Alert>
-              )}
               <Button
                 component={RouterLink}
                 to="/login"

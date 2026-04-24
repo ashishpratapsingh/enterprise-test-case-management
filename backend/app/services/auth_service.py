@@ -10,7 +10,6 @@ from typing import Any
 from jose import JWTError, ExpiredSignatureError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.exceptions import ConflictError, UnauthorizedError, ValidationError
 from app.core.security import (
     create_access_token,
@@ -20,6 +19,7 @@ from app.core.security import (
     verify_password,
 )
 from app.repositories.user_repository import UserRepository
+from app.services.mail_service import MailService, get_mail_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,15 @@ def _hash_reset_token(token: str) -> str:
 class AuthService:
     """Handles authentication workflows: login, registration, token refresh."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        mail_service: MailService | None = None,
+    ) -> None:
         self.session = session
         self.user_repo = UserRepository(session)
+        # Injectable for tests; defaults to the process-wide singleton.
+        self._mail_service = mail_service or get_mail_service()
 
     async def login(self, email: str, password: str) -> dict[str, Any]:
         """Authenticate a user and return access + refresh tokens.
@@ -129,16 +135,14 @@ class AuthService:
     async def request_password_reset(self, email: str) -> dict[str, Any]:
         """Begin a password-reset flow for the given email.
 
-        Always returns a generic success response regardless of whether the
-        email exists in the database — this prevents attackers from using the
-        endpoint to enumerate valid accounts. When the account exists, a
-        fresh random token is generated, its sha256 hash is stored with a
-        60-minute expiry, and the plaintext token is returned to the caller
-        *only* when DEBUG is enabled (so local/dev flows can complete the
-        reset without needing email infrastructure). In production, the
-        plaintext token would instead be mailed to the user.
+        Always returns the same generic response regardless of whether the
+        email exists — prevents attackers from using the endpoint to
+        enumerate accounts. When the account exists, a fresh random token
+        is generated, its sha256 hash is stored with a 60-minute expiry,
+        and the plaintext token is dispatched via the configured
+        ``MailService`` (which in local dev is the console backend — the
+        reset URL shows up in the backend logs).
         """
-        settings = get_settings()
         user = await self.user_repo.get_by_email(email)
         response: dict[str, Any] = {
             "message": "If that email is registered, a reset link has been issued.",
@@ -156,10 +160,15 @@ class AuthService:
             extra={"user_id": str(user.id), "email": user.email},
         )
 
-        # In a real deployment we would email the token; exposing it in the
-        # response is strictly a dev affordance. Never return it when not in DEBUG.
-        if settings.DEBUG:
-            response["reset_token"] = token
+        try:
+            await self._mail_service.send_password_reset(user.email, token)
+        except Exception:
+            # Mail failure must not leak back to the caller as a different
+            # response — otherwise the attacker can distinguish "user
+            # exists, mail broke" from "user does not exist". Log and
+            # swallow.
+            logger.exception("password_reset_email_send_failed")
+
         return response
 
     async def reset_password(self, token: str, new_password: str) -> dict[str, Any]:
