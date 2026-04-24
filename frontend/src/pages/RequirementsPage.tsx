@@ -174,15 +174,30 @@ const RequirementsPage: React.FC = () => {
     });
   }, [user]);
 
-  // Fetch all epics for User Story epic filter dropdown
-  useEffect(() => {
-    epicService.getAll({ page: 1, pageSize: 10000 }).then((res) => {
+  // Fetch all epics for the User Story epic dropdowns (both filter + create/edit).
+  // Must be refreshed after any epic create/update/delete so newly-created epics
+  // show up immediately when the user then opens the User Story dialog.
+  const refreshAllEpics = useCallback(async () => {
+    try {
+      const res = await epicService.getAll({ page: 1, pageSize: 10000 });
       const apiData = (res as any)?.data;
       if (Array.isArray(apiData)) {
-        setAllEpics((apiData[0] || []).map((e: any) => ({ id: e.id, title: e.title, project_id: e.project_id })));
+        setAllEpics(
+          (apiData[0] || []).map((e: any) => ({
+            id: e.id,
+            title: e.title,
+            project_id: e.project_id,
+          })),
+        );
       }
-    }).catch(() => {});
+    } catch {
+      // Silent — dropdown will just be empty; fetchEpics will surface errors.
+    }
   }, []);
+
+  useEffect(() => {
+    refreshAllEpics();
+  }, [refreshAllEpics]);
 
   // Fetch epics
   const fetchEpics = useCallback(async () => {
@@ -301,6 +316,9 @@ const RequirementsPage: React.FC = () => {
       }
       setEpicDialogOpen(false);
       fetchEpics();
+      // Also refresh the full epic list so the User Story dialog picks up
+      // newly-created / renamed epics without needing a page reload.
+      refreshAllEpics();
     } catch (err: any) {
       enqueueSnackbar(err.response?.data?.message || 'Failed to save epic', {
         variant: 'error',
@@ -316,6 +334,7 @@ const RequirementsPage: React.FC = () => {
       setDeleteDialogOpen(false);
       setDeleteId(null);
       fetchEpics();
+      refreshAllEpics();
     } catch {
       enqueueSnackbar('Failed to delete epic', { variant: 'error' });
     }

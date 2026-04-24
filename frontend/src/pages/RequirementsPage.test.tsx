@@ -118,4 +118,27 @@ describe('RequirementsPage', () => {
 
     expect(screen.queryByRole('button', { name: /new epic/i })).not.toBeInTheDocument();
   });
+
+  // Regression test for the "newly-created epic missing from User Story
+  // dropdown" bug. Before the fix, allEpics was loaded once on mount and
+  // never re-fetched after epic create, so a user who created an epic in
+  // the same session couldn't pick it when creating a user story. The
+  // component now loads a "full list" view (pageSize 10000) on mount AND
+  // after every epic create/update/delete.
+  it('loads the full epic list for dropdowns on mount', async () => {
+    render(
+      <TestProviders>
+        <RequirementsPage />
+      </TestProviders>,
+    );
+    // Wait until at least one call has been made, then inspect the set of
+    // calls — one of them must be the full-list signature used by the
+    // dropdown loader.
+    await waitFor(() => expect(epicService.getAll).toHaveBeenCalled());
+    const fullListCall = epicService.getAll.mock.calls.find(
+      (args: any[]) => args[0]?.pageSize === 10000,
+    );
+    expect(fullListCall).toBeDefined();
+  });
+
 });

@@ -8,7 +8,12 @@ from app.api.dependencies import (
     get_db,
     success_response,
 )
-from app.schemas.auth import LoginRequest, RefreshTokenRequest
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    ResetPasswordRequest,
+)
 from app.schemas.user import UserCreate
 from app.services.auth_service import AuthService
 
@@ -69,3 +74,43 @@ async def register(
         role_id=str(user_data.role_id),
     )
     return success_response(data={"id": user.id, "email": user.email}, message="User registered successfully")
+
+
+@router.post(
+    "/forgot-password",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Begin a password reset flow",
+)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Request a password reset.
+
+    Returns a generic success message regardless of whether the email exists
+    to prevent user enumeration. When DEBUG is enabled, the response includes
+    the plaintext ``reset_token`` so local/dev flows can complete without
+    email infrastructure.
+    """
+    service = AuthService(db)
+    result = await service.request_password_reset(email=body.email)
+    return success_response(data=result, message=result.get("message", "OK"))
+
+
+@router.post(
+    "/reset-password",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Complete a password reset",
+)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Complete a password reset using the token issued via /forgot-password."""
+    service = AuthService(db)
+    result = await service.reset_password(
+        token=body.token, new_password=body.new_password
+    )
+    return success_response(data=result, message=result.get("message", "OK"))

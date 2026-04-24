@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -11,6 +11,7 @@ import {
   CircularProgress,
   InputAdornment,
   IconButton,
+  Link,
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
@@ -132,6 +133,11 @@ const LoginPage: React.FC = () => {
             >
               {loading ? <CircularProgress size={24} color="inherit" /> : 'Sign In'}
             </Button>
+            <Box textAlign="center" mt={1}>
+              <Link component={RouterLink} to="/forgot-password" variant="body2">
+                Forgot password?
+              </Link>
+            </Box>
           </form>
         </CardContent>
       </Card>

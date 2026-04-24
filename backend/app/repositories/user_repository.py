@@ -30,3 +30,9 @@ class UserRepository(BaseRepository[User]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_by_reset_token(self, token_hash: str) -> User | None:
+        """Look up a user by the sha256 hash of their password-reset token."""
+        stmt = self._base_query().where(User.password_reset_token == token_hash)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()

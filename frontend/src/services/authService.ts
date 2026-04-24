@@ -81,6 +81,25 @@ export const authService = {
     return user;
   },
 
+  /**
+   * Initiate a password reset. Always resolves successfully; the backend
+   * responds with the same generic message regardless of whether the email
+   * is registered. In DEBUG mode, `data.reset_token` carries the plaintext
+   * token so a dev can complete the flow without email infrastructure.
+   */
+  async requestPasswordReset(email: string): Promise<{ message: string; reset_token?: string }> {
+    const res = await api.post(`${AUTH_PREFIX}/forgot-password`, { email });
+    return res.data?.data || { message: 'OK' };
+  },
+
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    const res = await api.post(`${AUTH_PREFIX}/reset-password`, {
+      token,
+      new_password: newPassword,
+    });
+    return res.data?.data || { message: 'OK' };
+  },
+
   isAuthenticated(): boolean {
     return !!localStorage.getItem('accessToken');
   },

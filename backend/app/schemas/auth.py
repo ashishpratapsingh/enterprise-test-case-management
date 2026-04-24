@@ -24,3 +24,16 @@ class RefreshTokenRequest(BaseModel):
     """Request to refresh an expired access token."""
 
     refresh_token: str = Field(description="JWT refresh token")
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Request to initiate a password reset flow."""
+
+    email: EmailStr = Field(description="Email address of the account to reset")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Complete a password reset using a token previously issued to the user."""
+
+    token: str = Field(min_length=10, description="Password reset token")
+    new_password: str = Field(min_length=8, description="New password (min 8 chars)")

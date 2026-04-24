@@ -1,12 +1,17 @@
-"""Authentication service: login, registration, and token refresh."""
+"""Authentication service: login, registration, token refresh, password reset."""
 
+import hashlib
+import logging
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from jose import JWTError, ExpiredSignatureError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.config import get_settings
+from app.core.exceptions import ConflictError, UnauthorizedError, ValidationError
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -15,6 +20,16 @@ from app.core.security import (
     verify_password,
 )
 from app.repositories.user_repository import UserRepository
+
+logger = logging.getLogger(__name__)
+
+# Password reset tokens are valid for 60 minutes from issuance.
+PASSWORD_RESET_TTL = timedelta(minutes=60)
+
+
+def _hash_reset_token(token: str) -> str:
+    """Return the sha256 hex digest of a reset token, used as the stored form."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class AuthService:
@@ -110,3 +125,75 @@ class AuthService:
             }
         )
         return user
+
+    async def request_password_reset(self, email: str) -> dict[str, Any]:
+        """Begin a password-reset flow for the given email.
+
+        Always returns a generic success response regardless of whether the
+        email exists in the database — this prevents attackers from using the
+        endpoint to enumerate valid accounts. When the account exists, a
+        fresh random token is generated, its sha256 hash is stored with a
+        60-minute expiry, and the plaintext token is returned to the caller
+        *only* when DEBUG is enabled (so local/dev flows can complete the
+        reset without needing email infrastructure). In production, the
+        plaintext token would instead be mailed to the user.
+        """
+        settings = get_settings()
+        user = await self.user_repo.get_by_email(email)
+        response: dict[str, Any] = {
+            "message": "If that email is registered, a reset link has been issued.",
+        }
+        if user is None or not user.is_active:
+            return response
+
+        token = secrets.token_urlsafe(32)
+        user.password_reset_token = _hash_reset_token(token)
+        user.password_reset_expires = datetime.now(timezone.utc) + PASSWORD_RESET_TTL
+        await self.session.flush()
+
+        logger.info(
+            "password_reset_requested",
+            extra={"user_id": str(user.id), "email": user.email},
+        )
+
+        # In a real deployment we would email the token; exposing it in the
+        # response is strictly a dev affordance. Never return it when not in DEBUG.
+        if settings.DEBUG:
+            response["reset_token"] = token
+        return response
+
+    async def reset_password(self, token: str, new_password: str) -> dict[str, Any]:
+        """Complete a password reset using a previously issued token.
+
+        Raises:
+            ValidationError: If the token is unknown, already used, or expired.
+        """
+        if not token:
+            raise ValidationError("Reset token is required")
+
+        token_hash = _hash_reset_token(token)
+        user = await self.user_repo.get_by_reset_token(token_hash)
+        if user is None:
+            raise ValidationError("Invalid or already-used reset token")
+
+        expires = user.password_reset_expires
+        if expires is None:
+            raise ValidationError("Invalid reset token")
+
+        # DB may return naive datetimes (SQLite); normalise to UTC for compare.
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires < datetime.now(timezone.utc):
+            # Clear the stale token so it can't be retried.
+            user.password_reset_token = None
+            user.password_reset_expires = None
+            await self.session.flush()
+            raise ValidationError("Reset token has expired")
+
+        user.hashed_password = get_password_hash(new_password)
+        user.password_reset_token = None
+        user.password_reset_expires = None
+        await self.session.flush()
+
+        logger.info("password_reset_completed", extra={"user_id": str(user.id)})
+        return {"message": "Password has been reset successfully"}

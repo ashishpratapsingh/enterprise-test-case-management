@@ -386,11 +386,16 @@ const TestSuitesPage: React.FC = () => {
       ),
     },
     {
-      field: 'test_suite_cases',
+      // `test_suite_cases` on the row is an array; pointing `field` at it
+      // makes AG Grid infer an object cell type and emit warning #48.
+      // Use a synthetic field name (not present in rowData) so AG Grid
+      // sees no object — the renderer still reads the array off the row.
+      field: 'test_suite_cases_count',
       headerName: 'Test Cases',
       width: 100,
       renderCell: (params) => {
-        const count = Array.isArray(params.value) ? params.value.length : 0;
+        const arr = params.row?.test_suite_cases;
+        const count = Array.isArray(arr) ? arr.length : 0;
         return (
           <Chip
             label={count}
@@ -406,7 +411,9 @@ const TestSuitesPage: React.FC = () => {
       },
     },
     {
-      field: 'creator',
+      // Same pattern as TestRunsPage: point field at the primitive `created_by`
+      // so AG Grid doesn't infer "object" from the nested `creator` User.
+      field: 'created_by',
       headerName: 'Created By',
       width: 130,
       renderCell: (params) => params.row?.creator?.full_name || '—',

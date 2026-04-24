@@ -9,6 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.base import BaseRepository
 
 
+def _safe_user(user: Any) -> dict | None:
+    """Return only public User fields — never leak password hashes or
+    reset tokens through nested relationships."""
+    if user is None:
+        return None
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+    }
+
+
 class TestRunRepository(BaseRepository):
     """Repository for TestRun-specific database operations."""
 
@@ -16,6 +28,28 @@ class TestRunRepository(BaseRepository):
         from app.models.test_run import TestRun
 
         super().__init__(TestRun, session)
+
+    def _serialize(self, item: Any) -> dict:
+        """Serialize a TestRun ORM row, stripping sensitive fields from the
+        eagerly-loaded ``creator`` relationship."""
+        return {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "test_suite_id": item.test_suite_id,
+            "release_id": item.release_id,
+            "assigned_to": item.assigned_to,
+            "status": item.status,
+            "environment": item.environment,
+            "started_at": item.started_at.isoformat() if item.started_at else None,
+            "completed_at": item.completed_at.isoformat() if item.completed_at else None,
+            "abort_reason": item.abort_reason,
+            "created_by": item.created_by,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "is_deleted": item.is_deleted,
+            "creator": _safe_user(getattr(item, "creator", None)),
+        }
 
     async def get_all(self, **kwargs) -> tuple[list, int]:
         """List test runs with filter support for project_id (via test suite) and search.
@@ -43,7 +77,7 @@ class TestRunRepository(BaseRepository):
             items, total = await super().get_all(filters=filters or None, **kwargs)
             for item in items:
                 await self.session.refresh(item, ["creator"])
-            return items, total
+            return [self._serialize(i) for i in items], total
 
         stmt = self._base_query(include_deleted=include_deleted)
 
@@ -73,7 +107,7 @@ class TestRunRepository(BaseRepository):
         items = list(result.scalars().all())
         for item in items:
             await self.session.refresh(item, ["creator"])
-        return items, total
+        return [self._serialize(i) for i in items], total
 
     async def get_by_suite(self, suite_id: uuid.UUID) -> list:
         """Get all test runs for a given test suite."""
