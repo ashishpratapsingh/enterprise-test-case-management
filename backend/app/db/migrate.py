@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 _COLUMN_ADDITIONS: list[tuple[str, str, str]] = [
     ("defects", "test_execution_id", "VARCHAR(36)"),
     ("defects", "step_number", "INTEGER"),
+    ("users", "password_reset_token", "VARCHAR(64)"),
+    ("users", "password_reset_expires", "DATETIME"),
 ]
 
 
