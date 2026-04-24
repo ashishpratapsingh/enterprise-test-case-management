@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, dev]
+
+# Cancel in-progress runs when a new commit is pushed to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────
+  # Backend — pytest + coverage floor
+  # ────────────────────────────────────────────────────────────────────────
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # pytest-cov is already in requirements; install pyflakes for the lint pass.
+          pip install pyflakes
+
+      - name: Lint (pyflakes — unused imports / undefined names)
+        # Non-fatal: the models use forward refs that pyflakes misreads as
+        # "undefined name"; keep this informational until we suppress those.
+        continue-on-error: true
+        run: python -m pyflakes app/ | grep "imported but unused" || true
+
+      - name: Run tests with coverage
+        env:
+          # Match the app's dev defaults so RateLimitMiddleware is bypassed,
+          # matching local test behaviour.
+          DEBUG: "true"
+          SECRET_KEY: "ci-only-ephemeral-secret-not-for-production-use"
+        run: |
+          pytest -q \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=60
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Frontend — type-check + Jest
+  # ────────────────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend (tsc + jest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Run Jest
+        env:
+          CI: "true"
+        run: npx react-scripts test --watchAll=false --passWithNoTests
