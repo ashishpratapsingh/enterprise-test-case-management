@@ -125,6 +125,35 @@ const Layout: React.FC = () => {
     <Box sx={{ display: 'flex' }}>
       <CssBaseline />
 
+      {/* Skip-to-content link — visually hidden until it receives focus
+          via the keyboard, then it becomes the first stop on the page.
+          Targets the <main> region by id below. */}
+      <Box
+        component="a"
+        href="#main-content"
+        sx={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          padding: '8px 16px',
+          backgroundColor: 'primary.main',
+          color: 'primary.contrastText',
+          fontWeight: 600,
+          textDecoration: 'none',
+          zIndex: (theme) => theme.zIndex.tooltip + 1,
+          // Hidden by default — only visible when this anchor receives
+          // keyboard focus.
+          transform: 'translateY(-150%)',
+          transition: 'transform 0.15s ease',
+          '&:focus, &:focus-visible': {
+            transform: 'translateY(0)',
+            outline: '3px solid #ffffff',
+          },
+        }}
+      >
+        Skip to main content
+      </Box>
+
       {/* App Bar */}
       <AppBar
         position="fixed"
@@ -151,6 +180,9 @@ const Layout: React.FC = () => {
             edge="start"
             onClick={() => setDrawerOpen(!drawerOpen)}
             sx={{ mr: 2 }}
+            aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={drawerOpen}
+            aria-controls="primary-navigation"
           >
             {drawerOpen ? <ChevronLeftIcon /> : <MenuIcon />}
           </IconButton>
@@ -238,6 +270,8 @@ const Layout: React.FC = () => {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         ModalProps={{ keepMounted: true }}
+        id="primary-navigation"
+        aria-label="Primary navigation"
         sx={{
           width: DRAWER_WIDTH,
           flexShrink: 0,
@@ -309,7 +343,9 @@ const Layout: React.FC = () => {
           canvas always spans full width and inset padding shrinks for
           smaller viewports. */}
       <Box
+        id="main-content"
         component="main"
+        tabIndex={-1}
         sx={{
           flexGrow: 1,
           p: { xs: 1.5, sm: 2.5, md: 3 },

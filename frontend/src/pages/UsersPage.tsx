@@ -632,7 +632,12 @@ const UsersPage: React.FC = () => {
                   InputProps={{
                     endAdornment: (
                       <InputAdornment position="end">
-                        <IconButton onClick={() => setShowPassword((s) => !s)} edge="end" size="small">
+                        <IconButton
+                          onClick={() => setShowPassword((s) => !s)}
+                          edge="end"
+                          size="small"
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        >
                           {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                         </IconButton>
                       </InputAdornment>
@@ -724,7 +729,12 @@ const UsersPage: React.FC = () => {
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton onClick={() => setShowPassword((s) => !s)} edge="end" size="small">
+                  <IconButton
+                    onClick={() => setShowPassword((s) => !s)}
+                    edge="end"
+                    size="small"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
                     {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                   </IconButton>
                 </InputAdornment>

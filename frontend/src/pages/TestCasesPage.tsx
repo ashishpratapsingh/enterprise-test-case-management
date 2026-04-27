@@ -1001,7 +1001,12 @@ const TestCasesPage: React.FC = () => {
                     value={step.testData || ''}
                     onChange={(e) => handleStepChange(idx, 'testData', e.target.value)}
                   />
-                  <IconButton onClick={() => handleRemoveStep(idx)} color="error" sx={{ mt: 0.5 }}>
+                  <IconButton
+                    onClick={() => handleRemoveStep(idx)}
+                    color="error"
+                    sx={{ mt: 0.5 }}
+                    aria-label={`Remove step ${idx + 1}`}
+                  >
                     <DeleteIcon />
                   </IconButton>
                 </Box>

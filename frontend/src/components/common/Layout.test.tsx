@@ -68,4 +68,39 @@ describe('Layout', () => {
     );
     expect(screen.getByRole('button', { name: /toggle color mode/i })).toBeInTheDocument();
   });
+
+  it('renders a skip-to-main-content link pointing at #main-content', () => {
+    setViewport('desktop');
+    render(
+      <TestProviders>
+        <Layout />
+      </TestProviders>,
+    );
+    const link = screen.getByRole('link', { name: /skip to main content/i });
+    expect(link).toHaveAttribute('href', '#main-content');
+  });
+
+  it('main region carries id="main-content" so the skip link can land on it', () => {
+    setViewport('desktop');
+    const { container } = render(
+      <TestProviders>
+        <Layout />
+      </TestProviders>,
+    );
+    const main = container.querySelector('main#main-content');
+    expect(main).not.toBeNull();
+  });
+
+  it('drawer toggle exposes aria-expanded and a descriptive aria-label', () => {
+    setViewport('desktop');
+    render(
+      <TestProviders>
+        <Layout />
+      </TestProviders>,
+    );
+    // Desktop default is drawer-open → label says "Close navigation".
+    const toggle = screen.getByRole('button', { name: /close navigation/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-controls', 'primary-navigation');
+  });
 });

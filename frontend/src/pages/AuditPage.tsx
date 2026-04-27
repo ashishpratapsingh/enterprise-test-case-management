@@ -647,7 +647,13 @@ const AuditPage: React.FC = () => {
                   {selectedLog.entity_id || '(new resource)'}
                 </Typography>
               </Box>
-              <IconButton size="small" onClick={() => setSelectedLog(null)}><CloseIcon /></IconButton>
+              <IconButton
+                size="small"
+                onClick={() => setSelectedLog(null)}
+                aria-label="Close"
+              >
+                <CloseIcon />
+              </IconButton>
             </Box>
 
             <Stack spacing={1.5} sx={{ mb: 2 }}>

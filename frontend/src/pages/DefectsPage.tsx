@@ -1254,7 +1254,11 @@ const DefectsPage: React.FC = () => {
             <BugIcon />
             Defect Details
           </Box>
-          <IconButton size="small" onClick={() => setViewDialogOpen(false)}>
+          <IconButton
+            size="small"
+            onClick={() => setViewDialogOpen(false)}
+            aria-label="Close"
+          >
             <CloseIcon />
           </IconButton>
         </DialogTitle>

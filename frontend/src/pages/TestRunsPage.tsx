@@ -1113,7 +1113,11 @@ const TestRunsPage: React.FC = () => {
               />
             )}
           </Box>
-          <IconButton size="small" onClick={() => setViewDialogOpen(false)}>
+          <IconButton
+            size="small"
+            onClick={() => setViewDialogOpen(false)}
+            aria-label="Close"
+          >
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -1352,7 +1356,10 @@ const TestRunsPage: React.FC = () => {
                                     onClick={() => setExpandedExecId(isExpanded ? null : exec.id)}
                                   >
                                     <TableCell sx={{ width: 40 }}>
-                                      <IconButton size="small">
+                                      <IconButton
+                                        size="small"
+                                        aria-label={isExpanded ? 'Collapse step results' : 'Expand step results'}
+                                      >
                                         {isExpanded ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
                                       </IconButton>
                                     </TableCell>
