@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.repositories.base import BaseRepository
+from app.utils.db_search import build_search_filter
 
 
 class DefectRepository(BaseRepository):
@@ -99,13 +100,15 @@ class DefectRepository(BaseRepository):
                         stmt = stmt.where(column == value)
 
         if search:
-            pattern = f"%{search}%"
-            stmt = stmt.where(
-                or_(
-                    self.model.title.ilike(pattern),
-                    self.model.description.ilike(pattern),
-                )
+            # Postgres → websearch_to_tsquery; SQLite → OR of LIKEs.
+            search_clause = build_search_filter(
+                self.model,
+                search,
+                ["title", "description"],
+                self.session.get_bind(),
             )
+            if search_clause is not None:
+                stmt = stmt.where(search_clause)
 
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total_result = await self.session.execute(count_stmt)
