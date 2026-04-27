@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -16,10 +15,12 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  LockOpen as LockOpenIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
 import DataTable, { GridColDef } from '../components/common/DataTable';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import PermissionMatrix, { Permissions } from '../components/roles/PermissionMatrix';
 import roleService, {
   RoleCreatePayload,
   RoleUpdatePayload,
@@ -27,27 +28,28 @@ import roleService, {
 import { Role } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { canManageUsers } from '../utils/roleGuard';
+import useIsMobile from '../hooks/useIsMobile';
 
 interface EditingRole {
   id?: string;
   name: string;
   description: string;
-  permissionsText: string;
+  permissions: Permissions;
 }
 
-const EMPTY: EditingRole = { name: '', description: '', permissionsText: '' };
+const EMPTY: EditingRole = { name: '', description: '', permissions: {} };
 
 const RolesPage: React.FC = () => {
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
   const userIsAdmin = user ? canManageUsers(user.role) : false;
+  const isMobile = useIsMobile();
 
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<EditingRole>(EMPTY);
-  const [permissionsError, setPermissionsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -70,7 +72,6 @@ const RolesPage: React.FC = () => {
 
   const openCreate = () => {
     setEditing(EMPTY);
-    setPermissionsError(null);
     setDialogOpen(true);
   };
 
@@ -79,35 +80,14 @@ const RolesPage: React.FC = () => {
       id: row.id,
       name: row.name,
       description: row.description || '',
-      permissionsText: row.permissions
-        ? JSON.stringify(row.permissions, null, 2)
-        : '',
+      permissions: (row.permissions as Permissions) || {},
     });
-    setPermissionsError(null);
     setDialogOpen(true);
   };
 
   const closeDialog = () => {
     setDialogOpen(false);
     setEditing(EMPTY);
-    setPermissionsError(null);
-  };
-
-  const parsePermissions = (): Record<string, string[]> | null | undefined => {
-    const trimmed = editing.permissionsText.trim();
-    if (!trimmed) return null;
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, string[]>;
-      }
-      throw new Error('Permissions must be a JSON object.');
-    } catch (err: any) {
-      setPermissionsError(
-        err?.message || 'Permissions must be valid JSON, e.g. {"users": ["read"]}',
-      );
-      return undefined;
-    }
   };
 
   const handleSave = async () => {
@@ -115,8 +95,9 @@ const RolesPage: React.FC = () => {
       enqueueSnackbar('Name is required', { variant: 'warning' });
       return;
     }
-    const permissions = parsePermissions();
-    if (permissions === undefined) return;
+
+    const permissions: Permissions | null =
+      Object.keys(editing.permissions).length === 0 ? null : editing.permissions;
 
     const payload: RoleCreatePayload | RoleUpdatePayload = {
       name: editing.name.trim(),
@@ -165,6 +146,41 @@ const RolesPage: React.FC = () => {
     }
   };
 
+  /**
+   * List-cell summary mirrors what AWS IAM / Auth0 / Okta show in a
+   * roles table: a small icon + a "M permissions across N resources"
+   * one-liner. Full detail lives behind the Edit dialog (the matrix).
+   */
+  const renderPermissionsSummary = (perms: Permissions | null | undefined) => {
+    if (!perms || Object.keys(perms).length === 0) {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          No permissions
+        </Typography>
+      );
+    }
+    const resourceCount = Object.keys(perms).length;
+    const actionCount = Object.values(perms).reduce(
+      (sum, list) => sum + (list?.length || 0),
+      0,
+    );
+    return (
+      <Box display="flex" alignItems="center" gap={1}>
+        <LockOpenIcon fontSize="small" sx={{ color: 'primary.main' }} />
+        <Typography variant="body2">
+          <Box component="strong" sx={{ color: 'text.primary' }}>
+            {actionCount}
+          </Box>{' '}
+          permission{actionCount === 1 ? '' : 's'} across{' '}
+          <Box component="strong" sx={{ color: 'text.primary' }}>
+            {resourceCount}
+          </Box>{' '}
+          resource{resourceCount === 1 ? '' : 's'}
+        </Typography>
+      </Box>
+    );
+  };
+
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', flex: 1, minWidth: 160 },
     {
@@ -177,56 +193,10 @@ const RolesPage: React.FC = () => {
     {
       field: 'permissions',
       headerName: 'Permissions',
-      flex: 3,
-      minWidth: 320,
-      // Let AG Grid grow the row when the chip list wraps so long
-      // permission sets stay legible instead of clipping.
-      autoHeight: true,
-      wrapText: true,
-      renderCell: (params) => {
-        const perms = params.value as Record<string, string[]> | null;
-        if (!perms || Object.keys(perms).length === 0) return '—';
-        return (
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 0.5,
-              // Vertical padding gives each row breathing room — without
-              // it, chips sit flush against the cell edges and the
-              // resource:actions text becomes hard to scan.
-              py: 1,
-            }}
-          >
-            {Object.entries(perms).map(([resource, actions]) => (
-              <Chip
-                key={resource}
-                size="small"
-                label={
-                  <Box component="span" sx={{ fontSize: '0.75rem' }}>
-                    <Box component="strong" sx={{ color: 'primary.main' }}>
-                      {resource}
-                    </Box>
-                    {actions && actions.length > 0
-                      ? `: ${actions.join(', ')}`
-                      : ''}
-                  </Box>
-                }
-                sx={{
-                  height: 'auto',
-                  alignSelf: 'flex-start',
-                  py: 0.5,
-                  '& .MuiChip-label': {
-                    whiteSpace: 'normal',
-                    lineHeight: 1.45,
-                    px: 1,
-                  },
-                }}
-              />
-            ))}
-          </Box>
-        );
-      },
+      flex: 1.5,
+      minWidth: 280,
+      renderCell: (params) =>
+        renderPermissionsSummary(params.value as Permissions | null),
     },
     {
       field: 'actions',
@@ -256,10 +226,7 @@ const RolesPage: React.FC = () => {
 
   return (
     <Box>
-      {/* Heading + action bar layout matches DefectsPage / TestCasesPage /
-          TestRunsPage: page title on its own row, then a right-aligned
-          action row, then the table. Title color matches the indigo
-          used across the other list pages. */}
+      {/* Heading + action bar layout matches the other list pages. */}
       <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
         Roles
       </Typography>
@@ -280,7 +247,13 @@ const RolesPage: React.FC = () => {
       <DataTable rows={roles} columns={columns} loading={loading} />
 
       {/* ── Create / Edit dialog ──────────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onClose={closeDialog} maxWidth="sm" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={closeDialog}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle>{editing.id ? 'Edit Role' : 'New Role'}</DialogTitle>
         <DialogContent dividers>
           <TextField
@@ -303,24 +276,22 @@ const RolesPage: React.FC = () => {
             }
             margin="normal"
           />
-          <TextField
-            label="Permissions (JSON)"
-            fullWidth
-            multiline
-            minRows={6}
-            value={editing.permissionsText}
-            onChange={(e) =>
-              setEditing((p) => ({ ...p, permissionsText: e.target.value }))
-            }
-            placeholder='{"users": ["create", "read", "update", "delete"]}'
-            margin="normal"
-            error={!!permissionsError}
-            helperText={
-              permissionsError ||
-              'Resource → list-of-actions map. Leave empty to clear.'
-            }
-            sx={{ '& textarea': { fontFamily: 'monospace', fontSize: '0.85rem' } }}
-          />
+          <Box mt={2}>
+            <Typography variant="subtitle2" fontWeight={600} mb={0.5}>
+              Permissions
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Tick the boxes for each resource × action combination this role
+              should grant. The leftmost checkbox per row toggles the whole
+              row at once.
+            </Typography>
+            <PermissionMatrix
+              value={editing.permissions}
+              onChange={(next) =>
+                setEditing((p) => ({ ...p, permissions: next }))
+              }
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={closeDialog} disabled={saving}>

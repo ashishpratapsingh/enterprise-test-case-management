@@ -79,7 +79,7 @@ describe('RolesPage', () => {
     expect(screen.queryByRole('button', { name: /new role/i })).not.toBeInTheDocument();
   });
 
-  it('rejects invalid permissions JSON without calling the service', async () => {
+  it('renders the permission matrix in the create dialog', async () => {
     render(
       <TestProviders>
         <RolesPage />
@@ -90,23 +90,21 @@ describe('RolesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /new role/i }));
     const dialog = await screen.findByRole('dialog');
 
-    fireEvent.change(within(dialog).getByLabelText(/^name/i), {
-      target: { value: 'Bad Role' },
-    });
-    fireEvent.change(within(dialog).getByLabelText(/permissions/i), {
-      target: { value: 'not-json' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: /create/i }));
-
-    expect(await within(dialog).findByText(/valid json|object/i)).toBeInTheDocument();
-    expect(roleService.create).not.toHaveBeenCalled();
+    // Matrix renders as a labelled table with checkboxes per
+    // resource × action pair. The accessible label proves the
+    // PermissionMatrix component mounted instead of the old JSON
+    // textarea.
+    const matrix = within(dialog).getByLabelText(/permission matrix/i);
+    expect(matrix).toBeInTheDocument();
+    // At least one of the canonical action columns must show up.
+    expect(within(matrix).getAllByText(/^create$/i).length).toBeGreaterThan(0);
   });
 
-  it('submits a valid role and refetches the list', async () => {
+  it('submits a role with permissions toggled via the matrix', async () => {
     roleService.create.mockResolvedValue({
       id: 'r-3',
       name: 'QA Lead',
-      description: 'Senior QA',
+      description: null,
       permissions: { test_cases: ['read'] },
     });
 
@@ -123,9 +121,9 @@ describe('RolesPage', () => {
     fireEvent.change(within(dialog).getByLabelText(/^name/i), {
       target: { value: 'QA Lead' },
     });
-    fireEvent.change(within(dialog).getByLabelText(/permissions/i), {
-      target: { value: '{"test_cases": ["read"]}' },
-    });
+    // Toggle the (test_cases × read) checkbox via its aria-label.
+    fireEvent.click(within(dialog).getByLabelText('test_cases read'));
+
     fireEvent.click(within(dialog).getByRole('button', { name: /create/i }));
 
     await waitFor(() =>
@@ -135,7 +133,25 @@ describe('RolesPage', () => {
         permissions: { test_cases: ['read'] },
       }),
     );
-    // Refetch happens after a successful save.
-    await waitFor(() => expect(roleService.getAll).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows a compact summary in the permissions cell', async () => {
+    render(
+      <TestProviders>
+        <RolesPage />
+      </TestProviders>,
+    );
+    await waitFor(() => expect(screen.getByText('Admin')).toBeInTheDocument());
+
+    // Summary text is split across nodes (numbers are <strong>), so we
+    // match the surrounding phrasing. Sample Admin role has 2 resources
+    // and 3 total actions.
+    const matches = screen.getAllByText((_content, node) => {
+      if (!node) return false;
+      const text = node.textContent || '';
+      return /3\s*permissions across\s*2\s*resources/i.test(text);
+    });
+    expect(matches.length).toBeGreaterThan(0);
+    expect(screen.getByText(/no permissions/i)).toBeInTheDocument();
   });
 });
