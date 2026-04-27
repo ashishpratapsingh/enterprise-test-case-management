@@ -149,7 +149,10 @@ const RolesPage: React.FC = () => {
   /**
    * List-cell summary mirrors what AWS IAM / Auth0 / Okta show in a
    * roles table: a small icon + a "M permissions across N resources"
-   * one-liner. Full detail lives behind the Edit dialog (the matrix).
+   * one-liner. Hovering or focusing the summary reveals a read-only
+   * permission matrix in a Tooltip — same component used by the edit
+   * dialog, just disabled. Tooltip closes on blur / mouse-leave; Esc
+   * dismisses if it has focus.
    */
   const renderPermissionsSummary = (perms: Permissions | null | undefined) => {
     if (!perms || Object.keys(perms).length === 0) {
@@ -165,19 +168,75 @@ const RolesPage: React.FC = () => {
       0,
     );
     return (
-      <Box display="flex" alignItems="center" gap={1}>
-        <LockOpenIcon fontSize="small" sx={{ color: 'primary.main' }} />
-        <Typography variant="body2">
-          <Box component="strong" sx={{ color: 'text.primary' }}>
-            {actionCount}
-          </Box>{' '}
-          permission{actionCount === 1 ? '' : 's'} across{' '}
-          <Box component="strong" sx={{ color: 'text.primary' }}>
-            {resourceCount}
-          </Box>{' '}
-          resource{resourceCount === 1 ? '' : 's'}
-        </Typography>
-      </Box>
+      <Tooltip
+        arrow
+        placement="left"
+        enterDelay={150}
+        leaveDelay={100}
+        title={
+          <Box sx={{ width: 'min(720px, 80vw)', maxHeight: '60vh', overflow: 'auto' }}>
+            <PermissionMatrix
+              value={perms}
+              onChange={() => { /* read-only preview */ }}
+              disabled
+            />
+          </Box>
+        }
+        slotProps={{
+          tooltip: {
+            sx: {
+              maxWidth: 'none',
+              bgcolor: 'background.paper',
+              color: 'text.primary',
+              p: 1,
+              boxShadow: 6,
+              border: 1,
+              borderColor: 'divider',
+            },
+          },
+          arrow: {
+            sx: {
+              color: 'background.paper',
+              '&::before': {
+                border: 1,
+                borderColor: 'divider',
+              },
+            },
+          },
+        }}
+      >
+        <Box
+          tabIndex={0}
+          aria-label={`Show permissions: ${actionCount} permissions across ${resourceCount} resources`}
+          display="inline-flex"
+          alignItems="center"
+          gap={1}
+          sx={{
+            cursor: 'help',
+            outline: 'none',
+            borderRadius: 1,
+            px: 0.5,
+            '&:hover, &:focus-visible': {
+              bgcolor: 'action.hover',
+            },
+            '&:focus-visible': {
+              boxShadow: (t) => `0 0 0 2px ${t.palette.primary.main}`,
+            },
+          }}
+        >
+          <LockOpenIcon fontSize="small" sx={{ color: 'primary.main' }} />
+          <Typography variant="body2">
+            <Box component="strong" sx={{ color: 'text.primary' }}>
+              {actionCount}
+            </Box>{' '}
+            permission{actionCount === 1 ? '' : 's'} across{' '}
+            <Box component="strong" sx={{ color: 'text.primary' }}>
+              {resourceCount}
+            </Box>{' '}
+            resource{resourceCount === 1 ? '' : 's'}
+          </Typography>
+        </Box>
+      </Tooltip>
     );
   };
 

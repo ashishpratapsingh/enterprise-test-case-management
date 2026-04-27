@@ -154,4 +154,26 @@ describe('RolesPage', () => {
     expect(matches.length).toBeGreaterThan(0);
     expect(screen.getByText(/no permissions/i)).toBeInTheDocument();
   });
+
+  it('reveals the read-only permission matrix when the summary is focused', async () => {
+    render(
+      <TestProviders>
+        <RolesPage />
+      </TestProviders>,
+    );
+    await waitFor(() => expect(screen.getByText('Admin')).toBeInTheDocument());
+
+    // Each summary is exposed as a focusable element with an
+    // aria-label that names the role's permission counts.
+    const summary = screen.getByLabelText(
+      /show permissions: 3 permissions across 2 resources/i,
+    );
+    summary.focus();
+
+    // Tooltip mounts on focus and renders the same matrix the edit
+    // dialog uses (just disabled). The matrix has aria-label
+    // "Permission matrix".
+    const matrix = await screen.findByLabelText(/permission matrix/i);
+    expect(matrix).toBeInTheDocument();
+  });
 });
