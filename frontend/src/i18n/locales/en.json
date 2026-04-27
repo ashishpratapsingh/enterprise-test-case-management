@@ -1,0 +1,22 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "requirements": "Requirements",
+    "test_cases": "Test Cases",
+    "test_suites": "Test Suites",
+    "test_runs": "Test Runs",
+    "defects": "Defects",
+    "reports": "Reports",
+    "users": "Users",
+    "roles": "Roles",
+    "audit_log": "Audit Log"
+  },
+  "common": {
+    "logout": "Logout",
+    "account": "Account",
+    "switch_to_light_mode": "Switch to light mode",
+    "switch_to_dark_mode": "Switch to dark mode",
+    "toggle_color_mode": "Toggle color mode"
+  }
+}

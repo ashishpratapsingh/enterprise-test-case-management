@@ -6,6 +6,7 @@ import App from './App';
 import { AuthContext, useAuthProvider } from './hooks/useAuth';
 import { ProjectProvider } from './contexts/ProjectContext';
 import { ColorModeProvider } from './contexts/ColorModeContext';
+import './i18n';
 
 const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const auth = useAuthProvider();

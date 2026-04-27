@@ -39,6 +39,7 @@ import {
   Brightness7 as LightModeIcon,
   Security as SecurityIcon,
 } from '@mui/icons-material';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageUsers } from '../../utils/roleGuard';
 import { useColorMode } from '../../contexts/ColorModeContext';
@@ -67,6 +68,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { mode, toggle: toggleColorMode } = useColorMode();
+  const { t } = useTranslation();
 
   // Snap drawer state when crossing the breakpoint so it doesn't get
   // stuck open/closed in the wrong mode after a window resize.
@@ -80,28 +82,28 @@ const Layout: React.FC = () => {
   };
 
   const navItems: NavItem[] = [
-    { label: 'Dashboard', path: '/', icon: <DashboardIcon />, visible: true },
-    { label: 'Projects', path: '/projects', icon: <FolderIcon />, visible: true },
-    { label: 'Requirements', path: '/requirements', icon: <RequirementsIcon />, visible: true },
-    { label: 'Test Cases', path: '/test-cases', icon: <DescriptionIcon />, visible: true },
-    { label: 'Test Suites', path: '/test-suites', icon: <SuiteIcon />, visible: true },
-    { label: 'Test Runs', path: '/test-runs', icon: <RunIcon />, visible: true },
-    { label: 'Defects', path: '/defects', icon: <BugIcon />, visible: true },
-    { label: 'Reports', path: '/reports', icon: <ReportIcon />, visible: true },
+    { label: t('nav.dashboard'), path: '/', icon: <DashboardIcon />, visible: true },
+    { label: t('nav.projects'), path: '/projects', icon: <FolderIcon />, visible: true },
+    { label: t('nav.requirements'), path: '/requirements', icon: <RequirementsIcon />, visible: true },
+    { label: t('nav.test_cases'), path: '/test-cases', icon: <DescriptionIcon />, visible: true },
+    { label: t('nav.test_suites'), path: '/test-suites', icon: <SuiteIcon />, visible: true },
+    { label: t('nav.test_runs'), path: '/test-runs', icon: <RunIcon />, visible: true },
+    { label: t('nav.defects'), path: '/defects', icon: <BugIcon />, visible: true },
+    { label: t('nav.reports'), path: '/reports', icon: <ReportIcon />, visible: true },
     {
-      label: 'Users',
+      label: t('nav.users'),
       path: '/users',
       icon: <PeopleIcon />,
       visible: user ? canManageUsers(user.role) : false,
     },
     {
-      label: 'Roles',
+      label: t('nav.roles'),
       path: '/roles',
       icon: <SecurityIcon />,
       visible: user ? canManageUsers(user.role) : false,
     },
     {
-      label: 'Audit Log',
+      label: t('nav.audit_log'),
       path: '/audit',
       icon: <AuditIcon />,
       visible: user ? canManageUsers(user.role) : false,
@@ -161,11 +163,17 @@ const Layout: React.FC = () => {
           </Box>
           {user && (
             <Box display="flex" alignItems="center" gap={1}>
-              <Tooltip title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+              <Tooltip
+                title={
+                  mode === 'dark'
+                    ? t('common.switch_to_light_mode')
+                    : t('common.switch_to_dark_mode')
+                }
+              >
                 <IconButton
                   color="inherit"
                   onClick={toggleColorMode}
-                  aria-label="Toggle color mode"
+                  aria-label={t('common.toggle_color_mode')}
                 >
                   {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
                 </IconButton>
@@ -179,7 +187,7 @@ const Layout: React.FC = () => {
               >
                 {user.full_name || user.email}
               </Typography>
-              <Tooltip title="Account">
+              <Tooltip title={t('common.account')}>
                 <IconButton color="inherit" onClick={(e) => setAnchorEl(e.currentTarget)}>
                   <Avatar
                     sx={{
@@ -213,7 +221,7 @@ const Layout: React.FC = () => {
                 </MenuItem>
                 <Divider />
                 <MenuItem onClick={handleLogout} sx={{ color: '#f57c00' }}>
-                  Logout
+                  {t('common.logout')}
                 </MenuItem>
               </Menu>
             </Box>
