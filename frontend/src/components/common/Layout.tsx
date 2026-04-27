@@ -33,9 +33,12 @@ import {
   History as AuditIcon,
   AccountCircle,
   ChevronLeft as ChevronLeftIcon,
+  Brightness4 as DarkModeIcon,
+  Brightness7 as LightModeIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageUsers } from '../../utils/roleGuard';
+import { useColorMode } from '../../contexts/ColorModeContext';
 import sabpaisaLogo from '../../assets/sabpaisa-logo.svg';
 import sabpaisaLogoWhite from '../../assets/sabpaisa-logo-white.svg';
 
@@ -54,6 +57,7 @@ const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { mode, toggle: toggleColorMode } = useColorMode();
 
   const navItems: NavItem[] = [
     { label: 'Dashboard', path: '/', icon: <DashboardIcon />, visible: true },
@@ -127,6 +131,15 @@ const Layout: React.FC = () => {
           </Box>
           {user && (
             <Box display="flex" alignItems="center" gap={1}>
+              <Tooltip title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+                <IconButton
+                  color="inherit"
+                  onClick={toggleColorMode}
+                  aria-label="Toggle color mode"
+                >
+                  {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+                </IconButton>
+              </Tooltip>
               <Typography variant="body2" sx={{ opacity: 0.9 }}>
                 {user.full_name || user.email}
               </Typography>
@@ -179,11 +192,14 @@ const Layout: React.FC = () => {
         sx={{
           width: DRAWER_WIDTH,
           flexShrink: 0,
+          // Drawer paper colors come from the active theme so light/dark
+          // mode flips correctly. Borders use theme.divider.
           '& .MuiDrawer-paper': {
             width: DRAWER_WIDTH,
             boxSizing: 'border-box',
-            background: '#ffffff',
-            borderRight: '1px solid rgba(26, 35, 126, 0.06)',
+            backgroundColor: 'background.paper',
+            borderRight: 1,
+            borderColor: 'divider',
           },
         }}
       >
@@ -211,11 +227,11 @@ const Layout: React.FC = () => {
                         },
                       },
                       '&:hover': {
-                        background: 'rgba(26, 35, 126, 0.04)',
+                        bgcolor: 'action.hover',
                       },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 40, color: '#6b7280' }}>{item.icon}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 40, color: 'text.secondary' }}>{item.icon}</ListItemIcon>
                     <ListItemText
                       primary={item.label}
                       primaryTypographyProps={{
@@ -230,9 +246,13 @@ const Layout: React.FC = () => {
         </Box>
 
         {/* Sidebar footer */}
-        <Box sx={{ mt: 'auto', p: 2, borderTop: '1px solid rgba(26,35,126,0.06)' }}>
+        <Box sx={{ mt: 'auto', p: 2, borderTop: 1, borderColor: 'divider' }}>
           <Box display="flex" alignItems="center" justifyContent="center">
-            <img src={sabpaisaLogo} alt="SabPaisa" style={{ height: 28, opacity: 0.7 }} />
+            <img
+              src={mode === 'dark' ? sabpaisaLogoWhite : sabpaisaLogo}
+              alt="SabPaisa"
+              style={{ height: 28, opacity: 0.7 }}
+            />
           </Box>
         </Box>
       </Drawer>
@@ -250,7 +270,8 @@ const Layout: React.FC = () => {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.leavingScreen,
             }),
-          backgroundColor: '#f8f9fc',
+          // Main canvas tracks the theme so dark mode actually goes dark.
+          backgroundColor: 'background.default',
           minHeight: '100vh',
         }}
       >

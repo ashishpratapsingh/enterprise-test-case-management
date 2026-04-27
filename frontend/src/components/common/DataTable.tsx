@@ -6,6 +6,7 @@ import {
   Select,
   MenuItem,
   Typography,
+  useTheme,
 } from '@mui/material';
 import {
   FirstPage as FirstPageIcon,
@@ -106,7 +107,7 @@ const rowHeightMap = { compact: 36, standard: 44, comfortable: 56 };
 
 // ── Custom AG Grid theme matching SabPaisa look ─────────────────────────────
 
-const sabpaisaTheme = themeQuartz.withParams({
+const sabpaisaThemeLight = themeQuartz.withParams({
   accentColor: '#f57c00',
   borderColor: 'rgba(26, 35, 126, 0.08)',
   borderRadius: 8,
@@ -120,6 +121,24 @@ const sabpaisaTheme = themeQuartz.withParams({
   selectedRowBackgroundColor: 'rgba(245, 124, 0, 0.08)',
   oddRowBackgroundColor: '#ffffff',
   foregroundColor: '#2d2d3f',
+  headerFontSize: 13,
+});
+
+const sabpaisaThemeDark = themeQuartz.withParams({
+  accentColor: '#f57c00',
+  borderColor: 'rgba(255, 255, 255, 0.08)',
+  borderRadius: 8,
+  browserColorScheme: 'dark',
+  fontFamily: '"DM Sans", "Inter", sans-serif',
+  fontSize: 13,
+  backgroundColor: '#1a1d27',
+  headerBackgroundColor: '#252836',
+  headerFontWeight: 600,
+  headerTextColor: '#9aa0aa',
+  rowHoverColor: 'rgba(245, 124, 0, 0.08)',
+  selectedRowBackgroundColor: 'rgba(245, 124, 0, 0.16)',
+  oddRowBackgroundColor: '#1a1d27',
+  foregroundColor: '#e6e7eb',
   headerFontSize: 13,
 });
 
@@ -140,6 +159,9 @@ const DataTable: React.FC<DataTableProps> = ({
   getRowStyle,
 }) => {
   const gridRef = useRef<AgGridReact>(null);
+  const muiTheme = useTheme();
+  const sabpaisaTheme =
+    muiTheme.palette.mode === 'dark' ? sabpaisaThemeDark : sabpaisaThemeLight;
 
   const agColumns = useMemo(() => mapColumns(columns), [columns]);
 
