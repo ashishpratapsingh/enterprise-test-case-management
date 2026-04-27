@@ -15,6 +15,8 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Menu as MuiMenu,
+  MenuItem as MuiMenuItem,
   Chip,
   Grid,
   Divider,
@@ -133,6 +135,14 @@ const DefectsPage: React.FC = () => {
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Bulk operations — selected row IDs come from the DataTable's checkbox
+  // column. Bulk-action menus + delete confirm live alongside.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkStatusAnchor, setBulkStatusAnchor] = useState<HTMLElement | null>(null);
+  const [bulkAssignAnchor, setBulkAssignAnchor] = useState<HTMLElement | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Epics & User Stories for dropdowns
   const [allEpics, setAllEpics] = useState<{ id: string; title: string; project_id: string }[]>([]);
@@ -325,6 +335,78 @@ const DefectsPage: React.FC = () => {
       }
     } catch (err: any) {
       enqueueSnackbar(err.response?.data?.message || 'Invalid status transition', { variant: 'error' });
+    }
+  };
+
+  // ── Bulk operation handlers ──────────────────────────────────────────────
+  // Each calls the matching defectService.bulk* endpoint, surfaces a
+  // succeeded/failed snackbar summary, refetches the list, and clears
+  // selection. Per-row failures (e.g. illegal status transitions, missing
+  // IDs) are rolled into a warning snackbar — the rest still apply.
+
+  const reportBulkResult = (
+    label: string,
+    result: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (result.succeeded.length > 0) {
+      enqueueSnackbar(
+        `${result.succeeded.length} defect(s) ${label}`,
+        { variant: 'success' },
+      );
+    }
+    if (result.failed.length > 0) {
+      enqueueSnackbar(
+        `${result.failed.length} defect(s) skipped: ${result.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const result = await defectService.bulkDelete(selectedIds);
+      reportBulkResult('deleted', result);
+      setSelectedIds([]);
+      setBulkDeleteConfirm(false);
+      fetchDefects();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkTransition = async (newStatus: string) => {
+    if (selectedIds.length === 0) return;
+    setBulkStatusAnchor(null);
+    setBulkBusy(true);
+    try {
+      const result = await defectService.bulkTransitionStatus(selectedIds, newStatus);
+      reportBulkResult(`transitioned to '${newStatus}'`, result);
+      setSelectedIds([]);
+      fetchDefects();
+    } catch {
+      enqueueSnackbar('Bulk transition failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkAssign = async (userId: string | null) => {
+    if (selectedIds.length === 0) return;
+    setBulkAssignAnchor(null);
+    setBulkBusy(true);
+    try {
+      const result = await defectService.bulkAssign(selectedIds, userId);
+      reportBulkResult(userId ? 'assigned' : 'unassigned', result);
+      setSelectedIds([]);
+      fetchDefects();
+    } catch {
+      enqueueSnackbar('Bulk assign failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -632,6 +714,101 @@ const DefectsPage: React.FC = () => {
         )}
       </Box>
 
+      {/* Bulk action bar — visible only when rows are selected */}
+      {userCanEdit && selectedIds.length > 0 && (
+        <Box
+          role="toolbar"
+          aria-label="Bulk actions"
+          mb={1.5}
+          px={2}
+          py={1}
+          display="flex"
+          alignItems="center"
+          gap={1.5}
+          sx={{
+            borderRadius: 2,
+            backgroundColor: 'rgba(245, 124, 0, 0.08)',
+            border: '1px solid rgba(245, 124, 0, 0.3)',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedIds.length} selected
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={(e) => setBulkStatusAnchor(e.currentTarget)}
+            disabled={bulkBusy}
+          >
+            Change status
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={(e) => setBulkAssignAnchor(e.currentTarget)}
+            disabled={bulkBusy}
+          >
+            Assign…
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setBulkDeleteConfirm(true)}
+            disabled={bulkBusy}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button
+            size="small"
+            onClick={() => setSelectedIds([])}
+            disabled={bulkBusy}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
+
+      {/* Bulk: status menu */}
+      <MuiMenu
+        anchorEl={bulkStatusAnchor}
+        open={Boolean(bulkStatusAnchor)}
+        onClose={() => setBulkStatusAnchor(null)}
+      >
+        {STATUSES.map((s) => (
+          <MuiMenuItem key={s} onClick={() => handleBulkTransition(s)}>
+            {s}
+          </MuiMenuItem>
+        ))}
+      </MuiMenu>
+
+      {/* Bulk: assignee menu */}
+      <MuiMenu
+        anchorEl={bulkAssignAnchor}
+        open={Boolean(bulkAssignAnchor)}
+        onClose={() => setBulkAssignAnchor(null)}
+      >
+        <MuiMenuItem onClick={() => handleBulkAssign(null)}>
+          <em>Unassigned</em>
+        </MuiMenuItem>
+        {users.map((u) => (
+          <MuiMenuItem key={u.id} onClick={() => handleBulkAssign(u.id)}>
+            {u.full_name || u.email}
+          </MuiMenuItem>
+        ))}
+      </MuiMenu>
+
+      <ConfirmDialog
+        open={bulkDeleteConfirm}
+        title={`Delete ${selectedIds.length} defect(s)?`}
+        message="This soft-deletes every selected defect. The action is reversible only via direct DB access."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setBulkDeleteConfirm(false)}
+        onConfirm={handleBulkDelete}
+      />
+
       {/* Data Table */}
       <DataTable
         rows={defects}
@@ -642,6 +819,9 @@ const DefectsPage: React.FC = () => {
         onPaginationModelChange={setPaginationModel}
         onRowClick={(params) => handleView(params)}
         getRowId={(row) => row.id}
+        checkboxSelection={userCanEdit}
+        rowSelectionModel={selectedIds}
+        onRowSelectionModelChange={setSelectedIds}
       />
 
       {/* ── Create/Edit Dialog ─────────────────────────────────────────────── */}

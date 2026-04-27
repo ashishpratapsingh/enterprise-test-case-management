@@ -156,6 +156,7 @@ const DataTable: React.FC<DataTableProps> = ({
   density = 'standard',
   getRowId,
   checkboxSelection = false,
+  onRowSelectionModelChange,
   getRowStyle,
 }) => {
   const gridRef = useRef<AgGridReact>(null);
@@ -256,12 +257,27 @@ const DataTable: React.FC<DataTableProps> = ({
           suppressPaginationPanel
           onRowClicked={onRowClicked}
           rowSelection={
-            // AG Grid v32+ object form. `enableClickSelection: false`
-            // replaces the deprecated top-level `suppressRowClickSelection`.
+            // AG Grid v32+ object form. ``enableClickSelection: false``
+            // replaces the deprecated top-level ``suppressRowClickSelection``.
+            // When checkboxSelection is on we show a checkbox column +
+            // header checkbox so the user can multi-select rows.
             checkboxSelection
-              ? { mode: 'multiRow', enableClickSelection: false }
+              ? {
+                  mode: 'multiRow',
+                  enableClickSelection: false,
+                  checkboxes: true,
+                  headerCheckbox: true,
+                }
               : undefined
           }
+          onSelectionChanged={(event) => {
+            if (!onRowSelectionModelChange) return;
+            const selectedRows = event.api.getSelectedRows();
+            const ids = selectedRows.map((r: any) =>
+              getRowId ? getRowId(r) : r?.id,
+            );
+            onRowSelectionModelChange(ids);
+          }}
           animateRows
           domLayout="normal"
           getRowStyle={getRowStyle}

@@ -79,6 +79,31 @@ export const defectService = {
   async deleteAttachment(defectId: string, attachmentId: string): Promise<void> {
     await api.delete(`${PREFIX}/${defectId}/attachments/${attachmentId}`);
   },
+
+  // ── Bulk operations ─────────────────────────────────────────────────
+  async bulkDelete(ids: string[]): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-delete`, { ids });
+    return response.data.data;
+  },
+
+  async bulkTransitionStatus(
+    ids: string[],
+    status: string,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-transition`, { ids, status });
+    return response.data.data;
+  },
+
+  async bulkAssign(
+    ids: string[],
+    assignedTo: string | null,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-assign`, {
+      ids,
+      assigned_to: assignedTo,
+    });
+    return response.data.data;
+  },
 };
 
 export default defectService;
