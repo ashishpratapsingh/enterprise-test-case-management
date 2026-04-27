@@ -177,19 +177,51 @@ const RolesPage: React.FC = () => {
     {
       field: 'permissions',
       headerName: 'Permissions',
-      flex: 2,
-      minWidth: 220,
+      flex: 3,
+      minWidth: 320,
+      // Let AG Grid grow the row when the chip list wraps so long
+      // permission sets stay legible instead of clipping.
+      autoHeight: true,
+      wrapText: true,
       renderCell: (params) => {
         const perms = params.value as Record<string, string[]> | null;
         if (!perms || Object.keys(perms).length === 0) return '—';
         return (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {Object.keys(perms).map((resource) => (
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 0.5,
+              // Vertical padding gives each row breathing room — without
+              // it, chips sit flush against the cell edges and the
+              // resource:actions text becomes hard to scan.
+              py: 1,
+            }}
+          >
+            {Object.entries(perms).map(([resource, actions]) => (
               <Chip
                 key={resource}
                 size="small"
-                label={`${resource} (${perms[resource].length})`}
-                sx={{ fontSize: '0.7rem' }}
+                label={
+                  <Box component="span" sx={{ fontSize: '0.75rem' }}>
+                    <Box component="strong" sx={{ color: 'primary.main' }}>
+                      {resource}
+                    </Box>
+                    {actions && actions.length > 0
+                      ? `: ${actions.join(', ')}`
+                      : ''}
+                  </Box>
+                }
+                sx={{
+                  height: 'auto',
+                  alignSelf: 'flex-start',
+                  py: 0.5,
+                  '& .MuiChip-label': {
+                    whiteSpace: 'normal',
+                    lineHeight: 1.45,
+                    px: 1,
+                  },
+                }}
               />
             ))}
           </Box>
