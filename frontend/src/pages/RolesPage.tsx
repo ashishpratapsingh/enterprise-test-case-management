@@ -18,7 +18,10 @@ import {
   LockOpen as LockOpenIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
-import DataTable, { GridColDef } from '../components/common/DataTable';
+import DataTable, {
+  GridColDef,
+  GridPaginationModel,
+} from '../components/common/DataTable';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import PermissionMatrix, { Permissions } from '../components/roles/PermissionMatrix';
 import roleService, {
@@ -47,6 +50,11 @@ const RolesPage: React.FC = () => {
 
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
+  // Default to 10 rows per page to match the other list pages.
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({
+    page: 0,
+    pageSize: 10,
+  });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<EditingRole>(EMPTY);
@@ -303,7 +311,13 @@ const RolesPage: React.FC = () => {
         )}
       </Box>
 
-      <DataTable rows={roles} columns={columns} loading={loading} />
+      <DataTable
+        rows={roles}
+        columns={columns}
+        loading={loading}
+        paginationModel={paginationModel}
+        onPaginationModelChange={setPaginationModel}
+      />
 
       {/* ── Create / Edit dialog ──────────────────────────────────────────── */}
       <Dialog
