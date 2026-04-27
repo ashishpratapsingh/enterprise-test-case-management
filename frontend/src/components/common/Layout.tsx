@@ -35,6 +35,7 @@ import {
   ChevronLeft as ChevronLeftIcon,
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
+  Security as SecurityIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageUsers } from '../../utils/roleGuard';
@@ -72,6 +73,12 @@ const Layout: React.FC = () => {
       label: 'Users',
       path: '/users',
       icon: <PeopleIcon />,
+      visible: user ? canManageUsers(user.role) : false,
+    },
+    {
+      label: 'Roles',
+      path: '/roles',
+      icon: <SecurityIcon />,
       visible: user ? canManageUsers(user.role) : false,
     },
     {

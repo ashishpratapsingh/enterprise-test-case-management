@@ -16,6 +16,7 @@ import ExecutionPage from './pages/ExecutionPage';
 import DefectsPage from './pages/DefectsPage';
 import ReportsPage from './pages/ReportsPage';
 import UsersPage from './pages/UsersPage';
+import RolesPage from './pages/RolesPage';
 import AuditPage from './pages/AuditPage';
 
 const App: React.FC = () => {
@@ -50,6 +51,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute roles={['admin']}>
               <UsersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/roles"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <RolesPage />
             </ProtectedRoute>
           }
         />
