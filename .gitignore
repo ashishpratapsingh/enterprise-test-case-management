@@ -75,3 +75,6 @@ backend/alembic/versions/*.pyc
 # Misc
 *.bak
 *.tmp
+
+# Generated documents
+NFR-roadmap.pdf

@@ -1,6 +1,7 @@
 """Unit tests for AuthService password-reset flow."""
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -15,102 +16,94 @@ from app.services.auth_service import (
 pytestmark = pytest.mark.asyncio
 
 
+class RecordingMail:
+    """Minimal MailService stand-in. Captures every password-reset send."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+        self.fail_with: Exception | None = None
+
+    async def send_password_reset(self, to_email: str, token: str) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.sent.append((to_email, token))
+
+    async def send(self, *_args: Any, **_kwargs: Any) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+
 class TestRequestPasswordReset:
-    async def test_known_email_issues_token_in_debug(
-        self, db_session, test_user, monkeypatch
-    ):
-        """When DEBUG=true, a plaintext reset_token is included in the response."""
-        from app.services import auth_service
-
-        def fake_settings():
-            class S:
-                DEBUG = True
-            return S()
-
-        monkeypatch.setattr(auth_service, "get_settings", fake_settings)
-
-        service = AuthService(db_session)
+    async def test_known_email_emails_the_token(self, db_session, test_user):
+        mail = RecordingMail()
+        service = AuthService(db_session, mail_service=mail)
         result = await service.request_password_reset(test_user.email)
-        assert "reset_token" in result
 
-        # The DB now stores the sha256 hash of the issued token and an expiry.
+        # Response is always the generic message — token never leaks back.
+        assert "reset_token" not in result
+        assert "message" in result
+
+        # One mail sent, containing the plaintext token.
+        assert len(mail.sent) == 1
+        to, token = mail.sent[0]
+        assert to == test_user.email
+        assert isinstance(token, str) and len(token) >= 20
+
+        # The stored hash must match sha256(plaintext).
         await db_session.refresh(test_user)
-        assert test_user.password_reset_token == _hash_reset_token(result["reset_token"])
+        assert test_user.password_reset_token == _hash_reset_token(token)
         assert test_user.password_reset_expires is not None
         expires = test_user.password_reset_expires
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
-        # Token should expire ~60 minutes from now.
         delta = expires - datetime.now(timezone.utc)
         assert timedelta(minutes=55) < delta <= PASSWORD_RESET_TTL
 
-    async def test_unknown_email_returns_generic_message(self, db_session, monkeypatch):
-        """Non-existent emails must NOT leak the reset_token — prevents enumeration."""
-        from app.services import auth_service
-
-        class S:
-            DEBUG = True
-
-        monkeypatch.setattr(auth_service, "get_settings", lambda: S())
-
-        service = AuthService(db_session)
-        result = await service.request_password_reset("nobody@tcm.local")
+    async def test_unknown_email_sends_nothing(self, db_session):
+        mail = RecordingMail()
+        service = AuthService(db_session, mail_service=mail)
+        result = await service.request_password_reset("nobody-unseen@example.com")
         assert "reset_token" not in result
         assert "message" in result
+        assert mail.sent == []
 
-    async def test_inactive_user_returns_generic_message(
-        self, db_session, test_user, monkeypatch
-    ):
-        from app.services import auth_service
-
-        class S:
-            DEBUG = True
-
-        monkeypatch.setattr(auth_service, "get_settings", lambda: S())
-
+    async def test_inactive_user_sends_nothing(self, db_session, test_user):
         test_user.is_active = False
         await db_session.flush()
 
-        service = AuthService(db_session)
-        result = await service.request_password_reset(test_user.email)
-        assert "reset_token" not in result
+        mail = RecordingMail()
+        service = AuthService(db_session, mail_service=mail)
+        await service.request_password_reset(test_user.email)
+        assert mail.sent == []
 
-    async def test_production_never_leaks_token(
-        self, db_session, test_user, monkeypatch
+    async def test_mail_failure_does_not_leak_to_caller(
+        self, db_session, test_user
     ):
-        """DEBUG=false must never include the plaintext token in the response."""
-        from app.services import auth_service
+        """If the mail backend raises, the API response must still be the
+        generic message so an attacker can't tell accounts apart."""
+        mail = RecordingMail()
+        mail.fail_with = RuntimeError("smtp down")
+        service = AuthService(db_session, mail_service=mail)
 
-        class S:
-            DEBUG = False
-
-        monkeypatch.setattr(auth_service, "get_settings", lambda: S())
-
-        service = AuthService(db_session)
         result = await service.request_password_reset(test_user.email)
         assert "reset_token" not in result
-        # But the DB still stores a hashed token so the user can complete the flow
-        # once they receive the emailed plaintext version.
+        assert "message" in result
+        # The token still got stored — mail failure shouldn't undo that.
         await db_session.refresh(test_user)
         assert test_user.password_reset_token is not None
 
 
 class TestResetPassword:
-    async def _issue_token(self, db_session, user, monkeypatch):
-        from app.services import auth_service
-
-        class S:
-            DEBUG = True
-
-        monkeypatch.setattr(auth_service, "get_settings", lambda: S())
-        service = AuthService(db_session)
-        result = await service.request_password_reset(user.email)
-        return service, result["reset_token"]
+    async def _issue_token(self, db_session, user) -> tuple[AuthService, str]:
+        mail = RecordingMail()
+        service = AuthService(db_session, mail_service=mail)
+        await service.request_password_reset(user.email)
+        assert len(mail.sent) == 1
+        return service, mail.sent[0][1]
 
     async def test_valid_token_updates_password_and_clears_token(
-        self, db_session, test_user, monkeypatch
+        self, db_session, test_user
     ):
-        service, token = await self._issue_token(db_session, test_user, monkeypatch)
+        service, token = await self._issue_token(db_session, test_user)
         await service.reset_password(token=token, new_password="NewP@ssw0rd1")
 
         await db_session.refresh(test_user)
@@ -118,40 +111,35 @@ class TestResetPassword:
         assert test_user.password_reset_token is None
         assert test_user.password_reset_expires is None
 
-    async def test_token_cannot_be_reused(
-        self, db_session, test_user, monkeypatch
-    ):
-        service, token = await self._issue_token(db_session, test_user, monkeypatch)
+    async def test_token_cannot_be_reused(self, db_session, test_user):
+        service, token = await self._issue_token(db_session, test_user)
         await service.reset_password(token=token, new_password="FirstP@ss1")
-
         with pytest.raises(ValidationError):
             await service.reset_password(token=token, new_password="SecondP@ss1")
 
     async def test_invalid_token_raises(self, db_session):
-        service = AuthService(db_session)
+        service = AuthService(db_session, mail_service=RecordingMail())
         with pytest.raises(ValidationError):
             await service.reset_password(
                 token="totally-not-a-real-token", new_password="ValidP@ss1"
             )
 
     async def test_empty_token_raises(self, db_session):
-        service = AuthService(db_session)
+        service = AuthService(db_session, mail_service=RecordingMail())
         with pytest.raises(ValidationError):
             await service.reset_password(token="", new_password="ValidP@ss1")
 
     async def test_expired_token_raises_and_is_cleared(
-        self, db_session, test_user, monkeypatch
+        self, db_session, test_user
     ):
-        service, token = await self._issue_token(db_session, test_user, monkeypatch)
+        service, token = await self._issue_token(db_session, test_user)
 
-        # Backdate expiry so the token is already dead.
         test_user.password_reset_expires = datetime.now(timezone.utc) - timedelta(minutes=1)
         await db_session.flush()
 
         with pytest.raises(ValidationError):
             await service.reset_password(token=token, new_password="ValidP@ss1")
 
-        # Expired-token check should clear the stored token as a side effect.
         await db_session.refresh(test_user)
         assert test_user.password_reset_token is None
         assert test_user.password_reset_expires is None
