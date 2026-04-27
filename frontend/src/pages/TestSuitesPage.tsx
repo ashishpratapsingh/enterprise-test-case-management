@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import useIsMobile from '../hooks/useIsMobile';
 import {
   Box,
   Button,
@@ -74,6 +75,7 @@ const TestSuitesPage: React.FC = () => {
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
   const userCanEdit = user ? canEdit(user.role) : false;
+  const isMobile = useIsMobile();
 
   const { projects } = useProjects();
   const [suites, setSuites] = useState<SuiteRow[]>([]);
@@ -532,7 +534,13 @@ const TestSuitesPage: React.FC = () => {
       />
 
       {/* Create/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>{editingSuite.id ? 'Edit Test Suite' : 'New Test Suite'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0.5 }}>

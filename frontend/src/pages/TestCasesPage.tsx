@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import useIsMobile from '../hooks/useIsMobile';
 import {
   Box,
   Button,
@@ -55,6 +56,7 @@ const TestCasesPage: React.FC = () => {
   const { user } = useAuth();
   const userCanEdit = user ? canEdit(user.role) : false;
   const userCanApprove = user ? canApprove(user.role) : false;
+  const isMobile = useIsMobile();
 
   const { projects } = useProjects();
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -743,7 +745,13 @@ const TestCasesPage: React.FC = () => {
       />
 
       {/* Create/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', gap: 1 }}>
           {editingCase.id ? 'Edit Test Case' : 'New Test Case'}
           {editingCase.id && editingTestCaseId && (
