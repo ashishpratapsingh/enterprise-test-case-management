@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import {
   AppBar,
@@ -18,6 +18,8 @@ import {
   Typography,
   Avatar,
   Tooltip,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -53,12 +55,29 @@ interface NavItem {
 }
 
 const Layout: React.FC = () => {
-  const [drawerOpen, setDrawerOpen] = useState(true);
+  const muiTheme = useTheme();
+  // ``md`` breakpoint = 900px. Below it, the drawer is a temporary
+  // overlay (taps outside dismiss it) and the main canvas spans the
+  // full viewport. Above it, the drawer is persistent and pushes the
+  // main canvas — same behaviour as before.
+  const isMobile = useMediaQuery(muiTheme.breakpoints.down('md'));
+  const [drawerOpen, setDrawerOpen] = useState(!isMobile);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
   const { mode, toggle: toggleColorMode } = useColorMode();
+
+  // Snap drawer state when crossing the breakpoint so it doesn't get
+  // stuck open/closed in the wrong mode after a window resize.
+  useEffect(() => {
+    setDrawerOpen(!isMobile);
+  }, [isMobile]);
+
+  const handleNavigate = (path: string) => {
+    navigate(path);
+    if (isMobile) setDrawerOpen(false);
+  };
 
   const navItems: NavItem[] = [
     { label: 'Dashboard', path: '/', icon: <DashboardIcon />, visible: true },
@@ -109,8 +128,12 @@ const Layout: React.FC = () => {
         position="fixed"
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          ml: drawerOpen ? `${DRAWER_WIDTH}px` : 0,
-          width: drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
+          // On mobile the drawer is a transient overlay, so the AppBar
+          // always spans the full viewport. On desktop it shrinks when
+          // the persistent drawer is open.
+          ml: !isMobile && drawerOpen ? `${DRAWER_WIDTH}px` : 0,
+          width:
+            !isMobile && drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
           transition: (theme) =>
             theme.transitions.create(['width', 'margin'], {
               easing: theme.transitions.easing.sharp,
@@ -147,7 +170,13 @@ const Layout: React.FC = () => {
                   {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
                 </IconButton>
               </Tooltip>
-              <Typography variant="body2" sx={{ opacity: 0.9 }}>
+              {/* Hide the (potentially long) full-name on small screens so
+                  the AppBar doesn't push the avatar off-screen. The name
+                  is still accessible via the account menu. */}
+              <Typography
+                variant="body2"
+                sx={{ opacity: 0.9, display: { xs: 'none', sm: 'block' } }}
+              >
                 {user.full_name || user.email}
               </Typography>
               <Tooltip title="Account">
@@ -192,15 +221,18 @@ const Layout: React.FC = () => {
         </Toolbar>
       </AppBar>
 
-      {/* Sidebar Drawer */}
+      {/* Sidebar Drawer
+          Mobile (< md): temporary overlay, dismissed by tapping outside
+          or selecting a nav item. Desktop: persistent, pushes the
+          main canvas. Same paper colors / theme rules apply to both. */}
       <Drawer
-        variant="persistent"
+        variant={isMobile ? 'temporary' : 'persistent'}
         open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        ModalProps={{ keepMounted: true }}
         sx={{
           width: DRAWER_WIDTH,
           flexShrink: 0,
-          // Drawer paper colors come from the active theme so light/dark
-          // mode flips correctly. Borders use theme.divider.
           '& .MuiDrawer-paper': {
             width: DRAWER_WIDTH,
             boxSizing: 'border-box',
@@ -219,7 +251,7 @@ const Layout: React.FC = () => {
                 <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
                     selected={isActive(item.path)}
-                    onClick={() => navigate(item.path)}
+                    onClick={() => handleNavigate(item.path)}
                     sx={{
                       borderRadius: 2,
                       py: 1.2,
@@ -264,20 +296,23 @@ const Layout: React.FC = () => {
         </Box>
       </Drawer>
 
-      {/* Main Content */}
+      {/* Main Content
+          On mobile the temporary drawer overlays this region, so the
+          canvas always spans full width and inset padding shrinks for
+          smaller viewports. */}
       <Box
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
-          ml: drawerOpen ? 0 : `-${DRAWER_WIDTH}px`,
-          width: drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
+          p: { xs: 1.5, sm: 2.5, md: 3 },
+          ml: !isMobile && drawerOpen ? 0 : (isMobile ? 0 : `-${DRAWER_WIDTH}px`),
+          width:
+            !isMobile && drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
           transition: (theme) =>
             theme.transitions.create(['margin', 'width'], {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.leavingScreen,
             }),
-          // Main canvas tracks the theme so dark mode actually goes dark.
           backgroundColor: 'background.default',
           minHeight: '100vh',
         }}
