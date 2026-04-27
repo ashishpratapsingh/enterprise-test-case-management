@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import useDefectAttachments from '../hooks/useDefectAttachments';
+import useIsMobile from '../hooks/useIsMobile';
 import {
   Box,
   Button,
@@ -109,6 +110,9 @@ const DefectsPage: React.FC = () => {
   const { user } = useAuth();
   const userCanEdit = user ? canEdit(user.role) : false;
   const { projects } = useProjects();
+  // Below the MUI ``md`` breakpoint we promote the create/edit and view
+  // dialogs to full-screen so forms don't get crammed into a narrow card.
+  const isMobile = useIsMobile();
 
   // Data
   const [defects, setDefects] = useState<any[]>([]);
@@ -825,7 +829,13 @@ const DefectsPage: React.FC = () => {
       />
 
       {/* ── Create/Edit Dialog ─────────────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', gap: 1 }}>
           <BugIcon />
           {editingDefect?.id ? 'Edit Defect' : 'New Defect'}
@@ -1236,7 +1246,8 @@ const DefectsPage: React.FC = () => {
         onClose={() => setViewDialogOpen(false)}
         maxWidth="md"
         fullWidth
-        PaperProps={{ sx: { maxHeight: '85vh' } }}
+        fullScreen={isMobile}
+        PaperProps={{ sx: { maxHeight: isMobile ? '100vh' : '85vh' } }}
       >
         <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box display="flex" alignItems="center" gap={1}>
