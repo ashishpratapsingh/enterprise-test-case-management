@@ -224,12 +224,22 @@ const RolesPage: React.FC = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main' }}>
-          Roles
-        </Typography>
+      {/* Heading + action bar layout matches DefectsPage / TestCasesPage /
+          TestRunsPage: page title on its own row, then a right-aligned
+          action row, then the table. Title color matches the indigo
+          used across the other list pages. */}
+      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+        Roles
+      </Typography>
+
+      <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
         {userIsAdmin && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={openCreate}
+            sx={{ whiteSpace: 'nowrap' }}
+          >
             New Role
           </Button>
         )}
