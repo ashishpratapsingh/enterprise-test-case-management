@@ -467,7 +467,7 @@ const TestSuitesPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
         Test Suites
       </Typography>
 
@@ -541,7 +541,7 @@ const TestSuitesPage: React.FC = () => {
         fullWidth
         fullScreen={isMobile}
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>{editingSuite.id ? 'Edit Test Suite' : 'New Test Suite'}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>{editingSuite.id ? 'Edit Test Suite' : 'New Test Suite'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} sm={6}>
@@ -780,7 +780,7 @@ const TestSuitesPage: React.FC = () => {
                                   <Chip label={tc.status} size="small" variant="outlined" sx={{ fontSize: 11 }} />
                                   {tc.epic_title && (
                                     <Tooltip title={`Epic: ${tc.epic_title}`} arrow>
-                                      <Chip label={`Epic: ${tc.epic_title.length > 20 ? tc.epic_title.substring(0, 20) + '...' : tc.epic_title}`} size="small" sx={{ fontSize: 11, maxWidth: 180, backgroundColor: 'rgba(26, 35, 126, 0.08)', color: '#1a237e', border: '1px solid rgba(26, 35, 126, 0.2)' }} />
+                                      <Chip label={`Epic: ${tc.epic_title.length > 20 ? tc.epic_title.substring(0, 20) + '...' : tc.epic_title}`} size="small" sx={{ fontSize: 11, maxWidth: 180, backgroundColor: 'rgba(26, 35, 126, 0.08)', color: 'secondary.main', border: '1px solid rgba(26, 35, 126, 0.2)' }} />
                                     </Tooltip>
                                   )}
                                   {tc.user_story_title && (

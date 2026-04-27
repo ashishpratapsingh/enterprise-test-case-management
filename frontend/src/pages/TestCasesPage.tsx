@@ -419,7 +419,7 @@ const TestCasesPage: React.FC = () => {
       blocked:     { bg: 'rgba(245, 158, 11, 0.1)',  color: '#d97706', border: 'rgba(245, 158, 11, 0.3)' },
       in_progress: { bg: 'rgba(59, 130, 246, 0.1)',  color: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)' },
       skipped:     { bg: 'rgba(107, 114, 128, 0.1)', color: '#6b7280', border: 'rgba(107, 114, 128, 0.3)' },
-      draft:       { bg: 'rgba(26, 35, 126, 0.08)',  color: '#1a237e', border: 'rgba(26, 35, 126, 0.2)' },
+      draft:       { bg: 'rgba(26, 35, 126, 0.08)',  color: 'secondary.main', border: 'rgba(26, 35, 126, 0.2)' },
       review:      { bg: 'rgba(245, 124, 0, 0.1)',  color: '#f57c00', border: 'rgba(245, 124, 0, 0.3)' },
       deprecated:  { bg: 'rgba(107, 114, 128, 0.08)',color: '#9ca3af', border: 'rgba(107, 114, 128, 0.2)' },
     };
@@ -598,7 +598,7 @@ const TestCasesPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
         Test Cases
       </Typography>
 
@@ -752,7 +752,7 @@ const TestCasesPage: React.FC = () => {
         fullWidth
         fullScreen={isMobile}
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
           {editingCase.id ? 'Edit Test Case' : 'New Test Case'}
           {editingCase.id && editingTestCaseId && (
             <Chip label={editingTestCaseId} size="small" variant="outlined" sx={{ fontWeight: 700, fontSize: 12 }} />
@@ -1052,7 +1052,7 @@ const TestCasesPage: React.FC = () => {
 
       {/* Upload Test Cases Dialog */}
       <Dialog open={uploadDialogOpen} onClose={() => { setUploadDialogOpen(false); setUploadFile(null); setUploadProjectId(''); setUploadEpicId(''); setUploadUserStoryId(''); }} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>Upload Test Cases</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>Upload Test Cases</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12}>

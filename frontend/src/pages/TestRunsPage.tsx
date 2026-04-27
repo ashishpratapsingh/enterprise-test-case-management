@@ -121,7 +121,7 @@ const getStatusConfig = (status: string) =>
 
 // ── Summary stat cards ────────────────────────────────────────────────────────
 const STAT_CARDS = [
-  { key: 'all', label: 'All', color: '#1a237e' },
+  { key: 'all', label: 'All', color: 'secondary.main' },
   { key: 'Not Started', label: 'TODO', color: '#6b7280' },
   { key: 'In Progress', label: 'Executing', color: '#2563eb' },
   { key: 'Blocked', label: 'Blocked', color: '#d97706' },
@@ -494,7 +494,7 @@ const TestRunsPage: React.FC = () => {
         <Typography
           variant="body2"
           fontWeight={600}
-          sx={{ color: '#1a237e' }}
+          sx={{ color: 'secondary.main' }}
         >
           {params.value}
         </Typography>
@@ -528,7 +528,7 @@ const TestRunsPage: React.FC = () => {
       headerName: 'Test Suite',
       width: 180,
       renderCell: (params) => (
-        <Typography variant="body2" sx={{ color: '#1a237e' }}>
+        <Typography variant="body2" sx={{ color: 'secondary.main' }}>
           {getSuiteName(params.value)}
         </Typography>
       ),
@@ -543,7 +543,7 @@ const TestRunsPage: React.FC = () => {
             label={params.value}
             size="small"
             variant="outlined"
-            sx={{ fontSize: 12, borderColor: 'rgba(26,35,126,0.2)', color: '#1a237e' }}
+            sx={{ fontSize: 12, borderColor: 'rgba(26,35,126,0.2)', color: 'secondary.main' }}
           />
         ) : (
           <Typography variant="body2" color="text.secondary">
@@ -785,7 +785,7 @@ const TestRunsPage: React.FC = () => {
   return (
     <Box>
       {/* Page header */}
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
         Test Runs
       </Typography>
 
@@ -808,7 +808,7 @@ const TestRunsPage: React.FC = () => {
                 cursor: 'pointer',
                 border: '1px solid',
                 borderColor: isActive ? card.color : 'rgba(0,0,0,0.08)',
-                backgroundColor: isActive ? `${card.color}08` : '#fff',
+                backgroundColor: isActive ? `${card.color}08` : 'background.paper',
                 transition: 'all 0.15s ease',
                 minWidth: 120,
                 textAlign: 'center',
@@ -923,7 +923,7 @@ const TestRunsPage: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>
           {editingRun.id ? 'Edit Test Run' : 'New Test Run'}
         </DialogTitle>
         <DialogContent>
@@ -1095,7 +1095,7 @@ const TestRunsPage: React.FC = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 700, color: '#1a237e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle sx={{ fontWeight: 700, color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box>
             Test Run Details
             {viewRun && (
@@ -1217,7 +1217,7 @@ const TestRunsPage: React.FC = () => {
                     const progressPct = total > 0 ? (executed / total) * 100 : 0;
 
                     const stats = [
-                      { label: 'Total', count: total, color: '#1a237e', icon: null },
+                      { label: 'Total', count: total, color: 'secondary.main', icon: null },
                       { label: 'Passed', count: passCount, color: '#4caf50', icon: <CheckCircle sx={{ fontSize: 18 }} /> },
                       { label: 'Failed', count: failCount, color: '#f44336', icon: <CancelIcon sx={{ fontSize: 18 }} /> },
                       { label: 'Blocked', count: blockedCount, color: '#ff9800', icon: <BlockIcon sx={{ fontSize: 18 }} /> },
@@ -1227,7 +1227,7 @@ const TestRunsPage: React.FC = () => {
 
                     return (
                       <>
-                        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: '#1a237e' }}>
+                        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: 'secondary.main' }}>
                           Execution Summary
                         </Typography>
 
@@ -1306,7 +1306,7 @@ const TestRunsPage: React.FC = () => {
                   {viewExecs.length > 0 && (
                     <>
                       <Divider sx={{ my: 2 }} />
-                      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: '#1a237e' }}>
+                      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: 'secondary.main' }}>
                         Test Case Results
                       </Typography>
                       <TableContainer sx={{ maxHeight: 500, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
@@ -1462,7 +1462,7 @@ const TestRunsPage: React.FC = () => {
 
                                           {/* Steps detail */}
                                           {steps.length > 0 ? (
-                                            <Table size="small" sx={{ bgcolor: '#fff', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                                            <Table size="small" sx={{ bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
                                               <TableHead>
                                                 <TableRow>
                                                   <TableCell sx={{ fontWeight: 700, bgcolor: '#fafafa', width: 60 }}>Step</TableCell>

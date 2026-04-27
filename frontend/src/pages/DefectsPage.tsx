@@ -648,7 +648,7 @@ const DefectsPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
         Defects
       </Typography>
 
@@ -836,7 +836,7 @@ const DefectsPage: React.FC = () => {
         fullWidth
         fullScreen={isMobile}
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
           <BugIcon />
           {editingDefect?.id ? 'Edit Defect' : 'New Defect'}
         </DialogTitle>
@@ -1192,7 +1192,7 @@ const DefectsPage: React.FC = () => {
                                   <Chip label={tc.status} size="small" variant="outlined" sx={{ fontSize: 11 }} />
                                   {tc.epic_title && (
                                     <Tooltip title={`Epic: ${tc.epic_title}`} arrow>
-                                      <Chip label={`Epic: ${tc.epic_title.length > 20 ? tc.epic_title.substring(0, 20) + '...' : tc.epic_title}`} size="small" sx={{ fontSize: 11, maxWidth: 180, backgroundColor: 'rgba(26, 35, 126, 0.08)', color: '#1a237e', border: '1px solid rgba(26, 35, 126, 0.2)' }} />
+                                      <Chip label={`Epic: ${tc.epic_title.length > 20 ? tc.epic_title.substring(0, 20) + '...' : tc.epic_title}`} size="small" sx={{ fontSize: 11, maxWidth: 180, backgroundColor: 'rgba(26, 35, 126, 0.08)', color: 'secondary.main', border: '1px solid rgba(26, 35, 126, 0.2)' }} />
                                     </Tooltip>
                                   )}
                                   {tc.user_story_title && (
@@ -1249,7 +1249,7 @@ const DefectsPage: React.FC = () => {
         fullScreen={isMobile}
         PaperProps={{ sx: { maxHeight: isMobile ? '100vh' : '85vh' } }}
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box display="flex" alignItems="center" gap={1}>
             <BugIcon />
             Defect Details
@@ -1265,7 +1265,7 @@ const DefectsPage: React.FC = () => {
         {viewDefect && (
           <DialogContent dividers>
             {/* Header info */}
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 1, color: '#1a237e' }}>
+            <Typography variant="h6" fontWeight={700} sx={{ mb: 1, color: 'secondary.main' }}>
               {viewDefect.title}
             </Typography>
 

@@ -58,7 +58,7 @@ const labelStyle = {
 
 const ROLE_STYLE: Record<string, { bg: string; color: string; border: string }> = {
   admin: { bg: 'rgba(239,68,68,0.10)', color: '#dc2626', border: 'rgba(239,68,68,0.35)' },
-  qa_head: { bg: 'rgba(26,35,126,0.10)', color: '#1a237e', border: 'rgba(26,35,126,0.35)' },
+  qa_head: { bg: 'rgba(26,35,126,0.10)', color: 'secondary.main', border: 'rgba(26,35,126,0.35)' },
   qa_engineer: { bg: 'rgba(59,130,246,0.10)', color: '#2563eb', border: 'rgba(59,130,246,0.3)' },
   developer: { bg: 'rgba(16,185,129,0.10)', color: '#059669', border: 'rgba(16,185,129,0.3)' },
   viewer: { bg: 'rgba(107,114,128,0.10)', color: '#6b7280', border: 'rgba(107,114,128,0.25)' },
@@ -297,7 +297,7 @@ const UsersPage: React.FC = () => {
     for (const u of users) {
       roleCounts[u.role_name] = (roleCounts[u.role_name] || 0) + 1;
     }
-    const baseCards = [{ key: '__total', label: 'All', count: totalRows, color: '#1a237e' }];
+    const baseCards = [{ key: '__total', label: 'All', count: totalRows, color: 'secondary.main' }];
     const perRole = roles.map((r) => ({
       key: r.id,
       label: r.name,
@@ -341,7 +341,7 @@ const UsersPage: React.FC = () => {
                 variant="body2"
                 fontWeight={600}
                 noWrap
-                sx={{ color: '#1a237e', fontSize: 14 }}
+                sx={{ color: 'secondary.main', fontSize: 14 }}
               >
                 {row.full_name}
               </Typography>
@@ -500,7 +500,7 @@ const UsersPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e' }}>
+        <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main' }}>
           User Management
         </Typography>
         {isAdmin && (
@@ -528,7 +528,7 @@ const UsersPage: React.FC = () => {
               cursor: 'pointer',
               border: '1px solid',
               borderColor: filterRole === card.key ? card.color : 'rgba(0,0,0,0.08)',
-              bgcolor: filterRole === card.key ? `${card.color}10` : '#fff',
+              bgcolor: filterRole === card.key ? `${card.color}10` : 'background.paper',
               minWidth: 110,
               textAlign: 'center',
               transition: 'all 0.15s ease',
@@ -594,7 +594,7 @@ const UsersPage: React.FC = () => {
 
       {/* ── Create / Edit Dialog ───────────────────────────────────────── */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700, color: '#1a237e' }}>
+        <DialogTitle sx={{ fontWeight: 700, color: 'secondary.main' }}>
           {editingUser.id ? 'Edit User' : 'New User'}
         </DialogTitle>
         <DialogContent>

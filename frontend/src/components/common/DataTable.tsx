@@ -215,13 +215,17 @@ const DataTable: React.FC<DataTableProps> = ({
       sx={{
         width: '100%',
         position: 'relative',
+        // Borders use the theme divider so AG Grid chrome stays consistent
+        // with the rest of the surface in both light and dark modes.
         '& .ag-root-wrapper': {
           borderRadius: '8px 8px 0 0',
-          border: '1px solid rgba(26, 35, 126, 0.08)',
+          border: 1,
+          borderColor: 'divider',
           borderBottom: 'none',
         },
         '& .ag-header': {
-          borderBottom: '2px solid rgba(26, 35, 126, 0.08)',
+          borderBottom: 2,
+          borderColor: 'divider',
         },
       }}
     >
@@ -236,12 +240,17 @@ const DataTable: React.FC<DataTableProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: 'rgba(255,255,255,0.7)',
+            // Loading veil tracks the active palette — pure white shines
+            // distractingly through the dark theme.
+            backgroundColor: (theme) =>
+              theme.palette.mode === 'dark'
+                ? 'rgba(15,17,23,0.7)'
+                : 'rgba(255,255,255,0.7)',
             zIndex: 10,
             borderRadius: '8px',
           }}
         >
-          <CircularProgress sx={{ color: '#f57c00' }} />
+          <CircularProgress sx={{ color: 'primary.main' }} />
         </Box>
       )}
       <Box sx={{ width: '100%', height: gridHeight - 52 }}>
@@ -283,7 +292,11 @@ const DataTable: React.FC<DataTableProps> = ({
           getRowStyle={getRowStyle}
         />
       </Box>
-      {/* Custom Pagination Bar */}
+      {/* Custom Pagination Bar
+          Subtle off-surface tone so the bar reads as chrome distinct
+          from the table rows above it. Light mode keeps the original
+          near-white; dark mode flips to a muted dark-gray that matches
+          the AG Grid header. */}
       <Box
         sx={{
           display: 'flex',
@@ -293,8 +306,10 @@ const DataTable: React.FC<DataTableProps> = ({
           py: 0.5,
           height: 52,
           borderRadius: '0 0 8px 8px',
-          border: '1px solid rgba(26, 35, 126, 0.08)',
-          backgroundColor: '#f8f9fc',
+          border: 1,
+          borderColor: 'divider',
+          backgroundColor: (theme) =>
+            theme.palette.mode === 'dark' ? '#252836' : '#f8f9fc',
         }}
       >
         <Box display="flex" alignItems="center" gap={1}>

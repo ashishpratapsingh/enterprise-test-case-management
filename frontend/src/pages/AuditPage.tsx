@@ -66,7 +66,7 @@ const ACTION_STYLE: Record<string, { bg: string; color: string; border: string }
   ACTIVATE: { bg: 'rgba(16,185,129,0.10)', color: '#059669', border: 'rgba(16,185,129,0.3)' },
   DEACTIVATE: { bg: 'rgba(245,158,11,0.10)', color: '#d97706', border: 'rgba(245,158,11,0.3)' },
   RESET_PASSWORD: { bg: 'rgba(168,85,247,0.10)', color: '#7e22ce', border: 'rgba(168,85,247,0.35)' },
-  LOGIN: { bg: 'rgba(26,35,126,0.08)', color: '#1a237e', border: 'rgba(26,35,126,0.25)' },
+  LOGIN: { bg: 'rgba(26,35,126,0.08)', color: 'secondary.main', border: 'rgba(26,35,126,0.25)' },
   LOGOUT: { bg: 'rgba(107,114,128,0.08)', color: '#6b7280', border: 'rgba(107,114,128,0.25)' },
   _default: { bg: 'rgba(107,114,128,0.08)', color: '#6b7280', border: 'rgba(107,114,128,0.25)' },
 };
@@ -194,7 +194,7 @@ const ChangeRow: React.FC<{ change: FieldChange }> = ({ change }) => {
             '& .MuiChip-icon': { color: accent },
           }}
         />
-        <Typography variant="body2" fontWeight={700} sx={{ color: '#1a237e' }}>
+        <Typography variant="body2" fontWeight={700} sx={{ color: 'secondary.main' }}>
           {prettyField(change.field)}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: 10 }}>
@@ -363,7 +363,7 @@ const AuditPage: React.FC = () => {
   // Top stat chips (last 7 days)
   const statChips = useMemo(() => {
     const ordered = Object.entries(stats.by_action).sort(([, a], [, b]) => b - a);
-    return [{ key: 'all', label: 'Last 7d', count: stats.total, color: '#1a237e' }, ...ordered.map(([action, count]) => {
+    return [{ key: 'all', label: 'Last 7d', count: stats.total, color: 'secondary.main' }, ...ordered.map(([action, count]) => {
       const s = actionStyleFor(action);
       return { key: action, label: action, count, color: s.color };
     })];
@@ -378,7 +378,7 @@ const AuditPage: React.FC = () => {
       renderCell: (params: any) => {
         try {
           return (
-            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12.5, color: '#1a237e' }}>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: 12.5, color: 'secondary.main' }}>
               {format(new Date(params.value), 'MMM dd, yyyy HH:mm:ss')}
             </Typography>
           );
@@ -404,14 +404,14 @@ const AuditPage: React.FC = () => {
           >
             <Avatar sx={{
               width: 34, height: 34, fontSize: 12, fontWeight: 700,
-              bgcolor: 'rgba(26,35,126,0.1)', color: '#1a237e',
+              bgcolor: 'rgba(26,35,126,0.1)', color: 'secondary.main',
               border: '1px solid rgba(26,35,126,0.25)',
               flexShrink: 0,
             }}>
               {initialsOf(row.user_name || row.user_email || '')}
             </Avatar>
             <Box sx={{ minWidth: 0, flexGrow: 1, lineHeight: 1.3 }}>
-              <Typography variant="body2" fontWeight={600} noWrap sx={{ color: '#1a237e', fontSize: 13.5 }}>
+              <Typography variant="body2" fontWeight={600} noWrap sx={{ color: 'secondary.main', fontSize: 13.5 }}>
                 {row.user_name || '—'}
               </Typography>
               <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', fontSize: 12 }}>
@@ -446,7 +446,7 @@ const AuditPage: React.FC = () => {
         const row = params.row as AuditLog;
         return (
           <Box sx={{ py: 0.75, minWidth: 0, lineHeight: 1.3 }}>
-            <Typography variant="body2" fontWeight={600} noWrap sx={{ color: '#1a237e', fontSize: 13.5 }}>
+            <Typography variant="body2" fontWeight={600} noWrap sx={{ color: 'secondary.main', fontSize: 13.5 }}>
               {prettyEntity(row.entity_type)}
             </Typography>
             <Typography
@@ -499,7 +499,7 @@ const AuditPage: React.FC = () => {
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Box>
-          <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e' }}>
+          <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main' }}>
             Audit Log
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -526,7 +526,7 @@ const AuditPage: React.FC = () => {
               px: 2.5, py: 1, borderRadius: 2, cursor: 'pointer',
               border: '1px solid',
               borderColor: filterAction === chip.key ? chip.color : 'rgba(0,0,0,0.08)',
-              bgcolor: filterAction === chip.key ? `${chip.color}10` : '#fff',
+              bgcolor: filterAction === chip.key ? `${chip.color}10` : 'background.paper',
               minWidth: 110, textAlign: 'center',
               transition: 'all 0.15s ease',
               '&:hover': { borderColor: chip.color, bgcolor: `${chip.color}08` },
@@ -639,7 +639,7 @@ const AuditPage: React.FC = () => {
                       />
                     );
                   })()}
-                  <Typography variant="h6" fontWeight={700} sx={{ color: '#1a237e' }}>
+                  <Typography variant="h6" fontWeight={700} sx={{ color: 'secondary.main' }}>
                     {prettyEntity(selectedLog.entity_type)}
                   </Typography>
                 </Box>

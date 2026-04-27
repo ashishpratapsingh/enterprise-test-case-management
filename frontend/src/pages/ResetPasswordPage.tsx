@@ -70,7 +70,7 @@ const ResetPasswordPage: React.FC = () => {
         <CardContent sx={{ p: 5 }}>
           <Box display="flex" flexDirection="column" alignItems="center" mb={3}>
             <img src={sabpaisaLogo} alt="SabPaisa" style={{ height: 48, marginBottom: 12 }} />
-            <Typography variant="h6" fontWeight={600} sx={{ color: '#1a237e', mt: 1 }}>
+            <Typography variant="h6" fontWeight={600} sx={{ color: 'secondary.main', mt: 1 }}>
               Choose a new password
             </Typography>
           </Box>

@@ -908,7 +908,7 @@ const RequirementsPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
         Requirements
       </Typography>
 
@@ -1114,7 +1114,7 @@ const RequirementsPage: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>
           {editingEpic.id ? 'Edit Epic' : 'New Epic'}
         </DialogTitle>
         <DialogContent>
@@ -1293,7 +1293,7 @@ const RequirementsPage: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>
           {editingStory.id ? 'Edit User Story' : 'New User Story'}
         </DialogTitle>
         <DialogContent>

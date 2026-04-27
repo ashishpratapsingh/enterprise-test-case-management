@@ -286,7 +286,7 @@ const RolesPage: React.FC = () => {
   return (
     <Box>
       {/* Heading + action bar layout matches the other list pages. */}
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
         Roles
       </Typography>
 
