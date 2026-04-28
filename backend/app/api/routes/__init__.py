@@ -8,6 +8,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.defects import router as defects_router
 from app.api.routes.executions import router as executions_router
+from app.api.routes.integrations import router as integrations_router
 from app.api.routes.modules import router as modules_router
 from app.api.routes.projects import router as projects_router
 from app.api.routes.releases import router as releases_router
@@ -39,3 +40,4 @@ router.include_router(dashboard_router)
 router.include_router(reports_router)
 router.include_router(epics_router)
 router.include_router(user_stories_router)
+router.include_router(integrations_router)

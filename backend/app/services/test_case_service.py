@@ -296,3 +296,81 @@ class TestCaseService:
             )
 
         return await self.tc_repo.update(test_case_id, {"status": new_status})
+
+    # ── Bulk operations ─────────────────────────────────────────────────
+    #
+    # Same partial-success contract as DefectService.bulk_*: each row
+    # is updated/transitioned/deleted independently; per-row failures
+    # (NotFound, illegal transition, validation) land in `failed` and
+    # never abort the whole batch.
+
+    async def bulk_delete(self, test_case_ids: list[Any]) -> dict[str, list]:
+        """Soft-delete each test case (and unlink from suites)."""
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for tcid in test_case_ids:
+            try:
+                await self.delete_test_case(tcid)
+                succeeded.append(str(tcid))
+            except NotFoundError as e:
+                failed.append({"id": str(tcid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_transition_approval(
+        self, test_case_ids: list[Any], new_status: str
+    ) -> dict[str, list]:
+        """Run approval-workflow transitions on many test cases. Honours
+        the same Draft → Ready → Approved table as the per-row endpoint;
+        invalid transitions are reported, not raised."""
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for tcid in test_case_ids:
+            try:
+                await self.transition_approval(tcid, new_status)
+                succeeded.append(str(tcid))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(tcid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_update(
+        self,
+        test_case_ids: list[Any],
+        *,
+        priority: str | None = None,
+        type_: str | None = None,
+        automation_status: str | None = None,
+        assigned_to: str | None = None,
+        unassign: bool = False,
+    ) -> dict[str, list]:
+        """Plain-field bulk edit: priority, type, automation_status,
+        assignee. Status changes go through ``bulk_transition_approval``
+        because of the workflow rules.
+
+        Caller must signal "clear assignee" via ``unassign=True``
+        because ``assigned_to=None`` already means "leave unchanged" in
+        this signature.
+        """
+        update_data: dict[str, Any] = {}
+        if priority is not None:
+            update_data["priority"] = priority
+        if type_ is not None:
+            update_data["type"] = type_
+        if automation_status is not None:
+            update_data["automation_status"] = automation_status
+        if unassign:
+            update_data["assigned_to"] = None
+        elif assigned_to is not None:
+            update_data["assigned_to"] = assigned_to
+
+        if not update_data:
+            raise ValidationError("At least one field must be provided to bulk_update")
+
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for tcid in test_case_ids:
+            try:
+                await self.update_test_case(tcid, update_data)
+                succeeded.append(str(tcid))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(tcid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}

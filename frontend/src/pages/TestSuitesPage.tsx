@@ -35,11 +35,14 @@ import {
   Search as SearchIcon,
   FilterList as FilterIcon,
   Clear as ClearIcon,
+  Close as CloseIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import { useSnackbar } from 'notistack';
 import DataTable from '../components/common/DataTable';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import ViewDialog from '../components/common/ViewDialog';
 import testSuiteService from '../services/testSuiteService';
 import testCaseService from '../services/testCaseService';
 import epicService from '../services/epicService';
@@ -135,9 +138,28 @@ const TestSuitesPage: React.FC = () => {
   const [availableTestCases, setAvailableTestCases] = useState<TestCaseOption[]>([]);
   const [tcSearchQuery, setTcSearchQuery] = useState('');
 
+  // Read-only detail dialog (opened via row double-click). Fetches the
+  // suite by id on open so the included test cases come back with titles
+  // — list rows include the junction rows but not always the hydrated
+  // case payload.
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewSuite, setViewSuite] = useState<any>(null);
+  const [viewSuiteCases, setViewSuiteCases] = useState<any[]>([]);
+  const [viewLoading, setViewLoading] = useState(false);
+
   // Delete
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // ── Bulk operations (JIRA-style) ───────────────────────────────────────
+  // Suites have a much simpler bulk surface than defects/test-cases:
+  // there's no field-by-field edit because suite metadata (name,
+  // description) is not the kind of thing you mass-update. The only
+  // useful bulk ops are Activate / Deactivate and Delete — surfaced
+  // inline on the action bar.
+  const [selectedSuiteIds, setSelectedSuiteIds] = useState<string[]>([]);
+  const [suiteBulkBusy, setSuiteBulkBusy] = useState(false);
+  const [suiteBulkDeleteConfirm, setSuiteBulkDeleteConfirm] = useState(false);
 
   // Fetch suites
   const fetchSuites = useCallback(async () => {
@@ -330,6 +352,53 @@ const TestSuitesPage: React.FC = () => {
     }
   };
 
+  // ── Bulk handlers ────────────────────────────────────────────────────
+  const reportBulkResult = (
+    label: string,
+    r: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (r.succeeded.length > 0) {
+      enqueueSnackbar(`${r.succeeded.length} suite(s) ${label}`, { variant: 'success' });
+    }
+    if (r.failed.length > 0) {
+      enqueueSnackbar(
+        `${r.failed.length} suite(s) skipped: ${r.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleSuiteBulkSetActive = async (isActive: boolean) => {
+    if (selectedSuiteIds.length === 0) return;
+    setSuiteBulkBusy(true);
+    try {
+      const r = await testSuiteService.bulkSetActive(selectedSuiteIds, isActive);
+      reportBulkResult(isActive ? 'activated' : 'deactivated', r);
+      setSelectedSuiteIds([]);
+      fetchSuites();
+    } catch {
+      enqueueSnackbar('Bulk update failed', { variant: 'error' });
+    } finally {
+      setSuiteBulkBusy(false);
+    }
+  };
+
+  const handleSuiteBulkDelete = async () => {
+    if (selectedSuiteIds.length === 0) return;
+    setSuiteBulkBusy(true);
+    try {
+      const r = await testSuiteService.bulkDelete(selectedSuiteIds);
+      reportBulkResult('deleted', r);
+      setSelectedSuiteIds([]);
+      setSuiteBulkDeleteConfirm(false);
+      fetchSuites();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setSuiteBulkBusy(false);
+    }
+  };
+
   // Delete
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -352,6 +421,133 @@ const TestSuitesPage: React.FC = () => {
   // Find project name for display
   const getProject = (projectId: string) => {
     return projects.find((proj) => String(proj.id) === String(projectId));
+  };
+
+  const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <Box sx={{ mb: 1.5 }}>
+      <Typography
+        variant="caption"
+        fontWeight={700}
+        color="text.secondary"
+        sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}
+      >
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ mt: 0.3, whiteSpace: 'pre-wrap' }}>
+        {value || '—'}
+      </Typography>
+    </Box>
+  );
+
+  const formatDateTime = (raw: string | null | undefined) => {
+    if (!raw) return null;
+    try {
+      return format(new Date(raw), 'MMM dd, yyyy HH:mm');
+    } catch {
+      return null;
+    }
+  };
+
+  // Color codes mirror TestCasesPage so the same test case looks the
+  // same wherever it appears (test cases list, suite detail, etc.).
+  const FALLBACK_STYLE = { bg: 'rgba(107, 114, 128, 0.08)', color: '#6b7280', border: 'rgba(107, 114, 128, 0.2)' };
+
+  const priorityStyle = (priority: string) => {
+    const styles: Record<string, { bg: string; color: string; border: string }> = {
+      critical: { bg: 'rgba(239, 68, 68, 0.1)',   color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)' },
+      high:     { bg: 'rgba(245, 158, 11, 0.1)',  color: '#d97706', border: 'rgba(245, 158, 11, 0.3)' },
+      medium:   { bg: 'rgba(59, 130, 246, 0.1)',  color: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)' },
+      low:      { bg: 'rgba(16, 185, 129, 0.1)',  color: '#10b981', border: 'rgba(16, 185, 129, 0.3)' },
+    };
+    return styles[(priority || '').toLowerCase()] || FALLBACK_STYLE;
+  };
+
+  const statusStyle = (status: string) => {
+    const styles: Record<string, { bg: string; color: string; border: string }> = {
+      passed:      { bg: 'rgba(16, 185, 129, 0.1)',  color: '#10b981', border: 'rgba(16, 185, 129, 0.3)' },
+      approved:    { bg: 'rgba(16, 185, 129, 0.1)',  color: '#10b981', border: 'rgba(16, 185, 129, 0.3)' },
+      failed:      { bg: 'rgba(239, 68, 68, 0.1)',   color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)' },
+      blocked:     { bg: 'rgba(245, 158, 11, 0.1)',  color: '#d97706', border: 'rgba(245, 158, 11, 0.3)' },
+      in_progress: { bg: 'rgba(59, 130, 246, 0.1)',  color: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)' },
+      skipped:     { bg: 'rgba(107, 114, 128, 0.1)', color: '#6b7280', border: 'rgba(107, 114, 128, 0.3)' },
+      draft:       { bg: 'rgba(26, 35, 126, 0.08)',  color: '#1a237e', border: 'rgba(26, 35, 126, 0.2)' },
+      review:      { bg: 'rgba(245, 124, 0, 0.1)',   color: '#f57c00', border: 'rgba(245, 124, 0, 0.3)' },
+      deprecated:  { bg: 'rgba(107, 114, 128, 0.08)',color: '#9ca3af', border: 'rgba(107, 114, 128, 0.2)' },
+    };
+    return styles[(status || '').toLowerCase()] || FALLBACK_STYLE;
+  };
+
+  const typeStyle = (type: string) => {
+    const styles: Record<string, { bg: string; color: string; border: string }> = {
+      functional:     { bg: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', border: 'rgba(59, 130, 246, 0.3)' },
+      'non-functional': { bg: 'rgba(124, 58, 237, 0.1)', color: '#7c3aed', border: 'rgba(124, 58, 237, 0.3)' },
+      smoke:          { bg: 'rgba(245, 158, 11, 0.1)', color: '#d97706', border: 'rgba(245, 158, 11, 0.3)' },
+      regression:     { bg: 'rgba(239, 68, 68, 0.1)',  color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)' },
+      integration:    { bg: 'rgba(20, 184, 166, 0.1)', color: '#0d9488', border: 'rgba(20, 184, 166, 0.3)' },
+      unit:           { bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: 'rgba(16, 185, 129, 0.3)' },
+      performance:    { bg: 'rgba(245, 124, 0, 0.1)',  color: '#f57c00', border: 'rgba(245, 124, 0, 0.3)' },
+      security:       { bg: 'rgba(220, 38, 38, 0.1)',  color: '#dc2626', border: 'rgba(220, 38, 38, 0.3)' },
+      ui:             { bg: 'rgba(236, 72, 153, 0.1)', color: '#db2777', border: 'rgba(236, 72, 153, 0.3)' },
+      api:            { bg: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', border: 'rgba(99, 102, 241, 0.3)' },
+      acceptance:     { bg: 'rgba(168, 85, 247, 0.1)', color: '#a855f7', border: 'rgba(168, 85, 247, 0.3)' },
+    };
+    return styles[(type || '').toLowerCase()] || FALLBACK_STYLE;
+  };
+
+  const titleCase = (raw: string) =>
+    String(raw || '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+  const handleViewSuite = async (row: SuiteRow) => {
+    setViewSuite(row);
+    setViewSuiteCases([]);
+    setViewDialogOpen(true);
+    // Junction rows from /test-suites only carry { id, test_case_id, ... }
+    // — no title / epic / user story. Fetch the suite (for the canonical
+    // junction list) and the project's enriched test cases (for title +
+    // epic_title + user_story_title), then join.
+    setViewLoading(true);
+    try {
+      const [detail, casesRes] = await Promise.all([
+        testSuiteService.getById(row.id),
+        testCaseService.getAll({ projectId: row.project_id, pageSize: 1000 }),
+      ]);
+      if (detail) {
+        // Preserve list-row creator if detail's is missing (defensive —
+        // older list rows had it populated; getById didn't until backend
+        // fix landed).
+        setViewSuite({
+          ...detail,
+          creator: detail.creator || (row as any).creator || null,
+        });
+      }
+
+      const apiData = (casesRes as any)?.data;
+      const allCases = Array.isArray(apiData) ? apiData[0] || [] : [];
+      const byId = new Map<string, any>(allCases.map((tc: any) => [tc.id, tc]));
+
+      const junctions = (detail?.test_suite_cases || row.test_suite_cases || []) as any[];
+      const enriched = junctions.map((sc: any) => {
+        const tc = byId.get(sc.test_case_id) || sc.test_case || {};
+        return {
+          ...sc,
+          test_case: {
+            id: tc.id,
+            title: tc.title,
+            test_case_id: tc.test_case_id,
+            priority: tc.priority,
+            status: tc.status,
+            type: tc.type,
+            epic_title: tc.epic_title || tc.epicTitle || null,
+            user_story_title: tc.user_story_title || tc.userStoryTitle || null,
+          },
+        };
+      });
+      setViewSuiteCases(enriched);
+    } catch {
+      // Keep whatever we have so far; read-only view shouldn't spam errors.
+    } finally {
+      setViewLoading(false);
+    }
   };
 
   const columns: GridColDef[] = [
@@ -467,7 +663,14 @@ const TestSuitesPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Test Suites
       </Typography>
 
@@ -523,6 +726,83 @@ const TestSuitesPage: React.FC = () => {
         </Box>
       </Box>
 
+      {/* Bulk action bar — Activate / Deactivate / Delete are the only
+          useful suite-level bulk ops; metadata edits make less sense
+          here. Keep them inline (no per-field dialog). */}
+      {userCanEdit && selectedSuiteIds.length > 0 && (
+        <Box
+          role="toolbar"
+          aria-label="Suite bulk actions"
+          mb={1.5}
+          px={2}
+          py={1}
+          display="flex"
+          alignItems="center"
+          gap={1.5}
+          sx={{
+            borderRadius: 2,
+            backgroundColor: 'rgba(245, 124, 0, 0.08)',
+            border: '1px solid rgba(245, 124, 0, 0.3)',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedSuiteIds.length} selected
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="success"
+            onClick={() => handleSuiteBulkSetActive(true)}
+            disabled={suiteBulkBusy}
+          >
+            Activate
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            onClick={() => handleSuiteBulkSetActive(false)}
+            disabled={suiteBulkBusy}
+          >
+            Deactivate
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setSuiteBulkDeleteConfirm(true)}
+            disabled={suiteBulkBusy}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button
+            size="small"
+            onClick={() => setSelectedSuiteIds([])}
+            disabled={suiteBulkBusy}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
+
+      <ConfirmDialog
+        open={suiteBulkDeleteConfirm}
+        title={`Delete ${selectedSuiteIds.length} suite(s)?`}
+        message="This soft-deletes every selected test suite. The action is reversible only via direct DB access. Test cases attached to these suites are not affected."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setSuiteBulkDeleteConfirm(false)}
+        onConfirm={handleSuiteBulkDelete}
+      />
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open suite details.
+      </Typography>
       <DataTable
         rows={suites}
         columns={columns}
@@ -531,6 +811,10 @@ const TestSuitesPage: React.FC = () => {
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
         getRowId={(row) => row.id}
+        onRowDoubleClick={({ row }) => handleViewSuite(row as SuiteRow)}
+        checkboxSelection={userCanEdit}
+        rowSelectionModel={selectedSuiteIds}
+        onRowSelectionModelChange={setSelectedSuiteIds}
       />
 
       {/* Create/Edit Dialog */}
@@ -822,6 +1106,213 @@ const TestSuitesPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Suite Detail (read-only). Double-clicking a row opens this. */}
+      <ViewDialog
+        open={viewDialogOpen}
+        onClose={() => setViewDialogOpen(false)}
+        fullScreen={isMobile}
+        title={
+          <>
+            <Typography variant="h6" fontWeight={700} component="span">
+              {viewSuite?.name || 'Test Suite'}
+            </Typography>
+            {viewSuite && (
+              <Chip
+                label={viewSuite.is_active ? 'Active' : 'Inactive'}
+                size="small"
+                sx={{
+                  fontWeight: 600,
+                  backgroundColor: viewSuite.is_active ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  color: viewSuite.is_active ? '#10b981' : '#ef4444',
+                  border: `1px solid ${viewSuite.is_active ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                }}
+              />
+            )}
+            {viewSuite && getProject(viewSuite.project_id)?.code && (
+              <Chip
+                label={getProject(viewSuite.project_id)?.code}
+                size="small"
+                sx={{ fontWeight: 600, bgcolor: 'action.selected' }}
+              />
+            )}
+          </>
+        }
+        onEdit={
+          userCanEdit && viewSuite
+            ? () => {
+                setViewDialogOpen(false);
+                handleEditSuite(viewSuite as SuiteRow);
+              }
+            : undefined
+        }
+      >
+        {viewSuite && (
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <DetailRow
+                label="Project"
+                value={getProject(viewSuite.project_id)?.name || viewSuite.project_id}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow
+                label="Test Cases"
+                value={
+                  <Chip
+                    label={viewSuiteCases.length}
+                    size="small"
+                    sx={{
+                      fontWeight: 600,
+                      backgroundColor: viewSuiteCases.length > 0 ? 'rgba(245, 124, 0, 0.1)' : 'rgba(107,114,128,0.08)',
+                      color: viewSuiteCases.length > 0 ? '#f57c00' : '#6b7280',
+                      border: `1px solid ${viewSuiteCases.length > 0 ? 'rgba(245,124,0,0.3)' : 'rgba(107,114,128,0.2)'}`,
+                    }}
+                  />
+                }
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <DetailRow label="Description" value={viewSuite.description} />
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 1 }}
+              >
+                Included Test Cases ({viewSuiteCases.length})
+              </Typography>
+              {viewLoading && viewSuiteCases.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">Loading…</Typography>
+              ) : viewSuiteCases.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No test cases attached to this suite.
+                </Typography>
+              ) : (
+                <List dense disablePadding>
+                  {viewSuiteCases.map((sc: any, i: number) => {
+                    const tc = sc.test_case || {};
+                    const title = tc.title || '—';
+                    const tcId = tc.test_case_id || '';
+                    const pri = priorityStyle(tc.priority);
+                    const stat = statusStyle(tc.status);
+                    const ty = typeStyle(tc.type);
+                    return (
+                      <ListItem
+                        key={sc.id || sc.test_case_id || i}
+                        sx={{
+                          borderBottom: 1,
+                          borderColor: 'divider',
+                          py: 1,
+                          alignItems: 'flex-start',
+                          flexDirection: 'column',
+                        }}
+                      >
+                        <Box width="100%" minWidth={0}>
+                          <Typography variant="body2" fontWeight={600} noWrap>
+                            {title}
+                          </Typography>
+                          {tcId && (
+                            <Typography variant="caption" color="text.secondary">
+                              {tcId}
+                            </Typography>
+                          )}
+                        </Box>
+                        <Box display="flex" gap={0.75} flexWrap="wrap" sx={{ mt: 0.75 }}>
+                          {tc.type && (
+                            <Chip
+                              label={`Type: ${titleCase(tc.type)}`}
+                              size="small"
+                              variant="outlined"
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                backgroundColor: 'transparent',
+                                color: ty.color,
+                                borderColor: ty.color,
+                                borderWidth: 1.5,
+                              }}
+                            />
+                          )}
+                          {tc.priority && (
+                            <Chip
+                              label={`Priority: ${titleCase(tc.priority)}`}
+                              size="small"
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                backgroundColor: pri.bg,
+                                color: pri.color,
+                                border: `1px solid ${pri.border}`,
+                              }}
+                            />
+                          )}
+                          {tc.status && (
+                            <Chip
+                              label={`Status: ${titleCase(tc.status)}`}
+                              size="small"
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                backgroundColor: stat.bg,
+                                color: stat.color,
+                                border: `1px solid ${stat.border}`,
+                              }}
+                            />
+                          )}
+                          {tc.user_story_title && (
+                            <Chip
+                              label={`Story: ${tc.user_story_title}`}
+                              size="small"
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                backgroundColor: 'rgba(59,130,246,0.08)',
+                                color: '#2563eb',
+                                border: '1px solid rgba(59,130,246,0.25)',
+                              }}
+                            />
+                          )}
+                          {tc.epic_title && (
+                            <Chip
+                              label={`Epic: ${tc.epic_title}`}
+                              size="small"
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                backgroundColor: 'rgba(124,58,237,0.08)',
+                                color: '#7c3aed',
+                                border: '1px solid rgba(124,58,237,0.25)',
+                              }}
+                            />
+                          )}
+                        </Box>
+                      </ListItem>
+                    );
+                  })}
+                </List>
+              )}
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Created By" value={viewSuite.creator?.full_name} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Created" value={formatDateTime(viewSuite.created_at)} />
+            </Grid>
+            {viewSuite.updated_at && (
+              <Grid item xs={12} sm={6}>
+                <DetailRow label="Last Updated" value={formatDateTime(viewSuite.updated_at)} />
+              </Grid>
+            )}
+          </Grid>
+        )}
+      </ViewDialog>
 
       {/* Delete Confirmation */}
       <ConfirmDialog

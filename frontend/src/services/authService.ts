@@ -117,6 +117,53 @@ export const authService = {
       return null;
     }
   },
+
+  // ── SSO (OIDC) ──────────────────────────────────────────────────────
+
+  /** Public-ish config used by LoginPage to decide whether to render
+   *  the "Sign in with SSO" button. No auth required. */
+  async getSsoConfig(): Promise<{ enabled: boolean; provider_name: string; login_url: string }> {
+    const res = await api.get(`${AUTH_PREFIX}/sso/config`);
+    return res.data.data;
+  },
+
+  /** Drop the user at the backend's /sso/login (which redirects to
+   *  the IdP). We do a hard navigate so the browser follows the
+   *  307 redirect chain. */
+  beginSsoLogin(returnTo?: string): void {
+    const baseURL = (api.defaults.baseURL || '').replace(/\/$/, '');
+    const params = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : '';
+    window.location.assign(`${baseURL}${AUTH_PREFIX}/sso/login${params}`);
+  },
+
+  /**
+   * Consume the JWTs the backend left in the URL fragment after a
+   * successful SSO callback. Stores them, fetches the profile, and
+   * caches the user — same shape as ``login`` so router code doesn't
+   * branch.
+   */
+  async completeSsoLogin(fragment: string): Promise<{ user: any; returnTo: string }> {
+    const params = new URLSearchParams(fragment.replace(/^#/, ''));
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    const userId = params.get('user_id');
+    const returnTo = params.get('return_to') || '/';
+    if (!accessToken || !refreshToken || !userId) {
+      throw new Error('Missing SSO tokens in callback');
+    }
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('refreshToken', refreshToken);
+
+    let user: any;
+    try {
+      const meRes = await api.get('/users/me');
+      user = normalizeProfile(meRes.data?.data);
+    } catch {
+      user = { id: userId, email: '', role: '', role_name: '' };
+    }
+    localStorage.setItem('user', JSON.stringify(user));
+    return { user, returnTo };
+  },
 };
 
 export default authService;

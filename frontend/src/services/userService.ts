@@ -82,6 +82,30 @@ export const userService = {
       new_password: newPassword,
     });
   },
+
+  // ── Bulk operations (admin-only) ───────────────────────────────────
+  async bulkSetActive(
+    ids: string[],
+    isActive: boolean,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const r = await api.post(`${PREFIX}/bulk-set-active`, { ids, is_active: isActive });
+    return r.data.data;
+  },
+
+  async bulkSetRole(
+    ids: string[],
+    roleId: string,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const r = await api.post(`${PREFIX}/bulk-set-role`, { ids, role_id: roleId });
+    return r.data.data;
+  },
+
+  async bulkDelete(
+    ids: string[],
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const r = await api.post(`${PREFIX}/bulk-delete`, { ids });
+    return r.data.data;
+  },
 };
 
 export default userService;

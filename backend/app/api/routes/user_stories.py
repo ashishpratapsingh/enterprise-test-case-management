@@ -1,13 +1,39 @@
 """User story management routes."""
 
 from fastapi import APIRouter, Body, Depends, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
+from app.core.exceptions import ValidationError
 from app.services.user_story_service import UserStoryService
 from app.utils.helpers import build_filters
 
 router = APIRouter(prefix="/user-stories", tags=["User Stories"])
+
+
+# ── Bulk operation schemas ─────────────────────────────────────────────────
+
+
+class _BulkIds(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500, description="User story IDs")
+
+
+class _BulkUpdate(_BulkIds):
+    """Plain-field bulk edit. ``clear_*`` flags force the matching
+    column to null; otherwise omit the field to leave it untouched on
+    every selected story."""
+    status: str | None = Field(default=None, max_length=30)
+    priority: str | None = Field(default=None, max_length=30)
+    epic_id: str | None = Field(default=None, description="Target epic ID")
+    clear_epic: bool = Field(default=False, description="Force-clear the epic")
+    assigned_to: str | None = Field(default=None, description="Target user ID")
+    unassign: bool = Field(default=False, description="Force-clear the assignee")
+    # Allowed values are validated by the service against the
+    # Fibonacci scale {0, 1, 2, 3, 5, 8, 13}. The schema only enforces
+    # the bare type so route-level errors are 422 for non-int input.
+    story_points: int | None = Field(default=None, description="Target story points (Fibonacci 0–13)")
+    clear_story_points: bool = Field(default=False, description="Force-clear story points")
 
 
 @router.get(
@@ -116,3 +142,68 @@ async def delete_user_story(
     service = UserStoryService(db)
     await service.delete_user_story(story_id=story_id)
     return success_response(message="User story deleted successfully")
+
+
+# ── Bulk operations ────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/bulk-delete",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete multiple user stories",
+)
+async def bulk_delete_user_stories(
+    payload: _BulkIds = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = UserStoryService(db)
+    result = await service.bulk_delete(payload.ids)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} user story(ies) deleted",
+    )
+
+
+@router.post(
+    "/bulk-update",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-update plain fields (status, priority, epic, assignee)",
+)
+async def bulk_update_user_stories(
+    payload: _BulkUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    has_change = (
+        payload.status is not None
+        or payload.priority is not None
+        or payload.epic_id is not None
+        or payload.clear_epic
+        or payload.assigned_to is not None
+        or payload.unassign
+        or payload.story_points is not None
+        or payload.clear_story_points
+    )
+    if not has_change:
+        raise ValidationError(
+            "At least one editable field must be provided"
+        )
+    service = UserStoryService(db)
+    result = await service.bulk_update(
+        payload.ids,
+        status=payload.status,
+        priority=payload.priority,
+        epic_id=payload.epic_id,
+        clear_epic=payload.clear_epic,
+        assigned_to=payload.assigned_to,
+        unassign=payload.unassign,
+        story_points=payload.story_points,
+        clear_story_points=payload.clear_story_points,
+    )
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} user story(ies) updated",
+    )

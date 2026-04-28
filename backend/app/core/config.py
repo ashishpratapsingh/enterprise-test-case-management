@@ -56,10 +56,52 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
 
     # External Integrations (optional)
+    # JIRA Cloud uses Basic auth (``email:api_token``); set both
+    # JIRA_USER_EMAIL and JIRA_API_TOKEN. Self-hosted JIRA Server uses
+    # Bearer auth — leave JIRA_USER_EMAIL blank and only set the token.
     JIRA_BASE_URL: str | None = None
+    JIRA_USER_EMAIL: str | None = None
     JIRA_API_TOKEN: str | None = None
+    JIRA_DEFAULT_PROJECT_KEY: str | None = None
     BITBUCKET_BASE_URL: str | None = None
     BITBUCKET_API_TOKEN: str | None = None
+    # GitHub: leave GITHUB_BASE_URL unset for github.com; for GitHub
+    # Enterprise set it to ``https://github.your-org.com/api/v3``.
+    # GITHUB_TOKEN is a Personal Access Token (classic or fine-grained)
+    # with at least ``repo:read`` scope. GITHUB_DEFAULT_REPO is
+    # ``owner/repo`` and just pre-fills the picker.
+    GITHUB_BASE_URL: str | None = None
+    GITHUB_TOKEN: str | None = None
+    GITHUB_DEFAULT_REPO: str | None = None
+
+    # OIDC / SSO — works with any standards-compliant IdP (Okta, Azure
+    # AD, Google, Keycloak, Auth0, …). Set OIDC_DISCOVERY_URL to the
+    # IdP's well-known config (e.g.
+    # ``https://accounts.google.com/.well-known/openid-configuration``)
+    # and the rest is auto-discovered. OIDC_REDIRECT_URI must be
+    # whitelisted in the IdP — derived from APP_BASE_URL when blank.
+    OIDC_DISCOVERY_URL: str | None = None
+    OIDC_CLIENT_ID: str | None = None
+    OIDC_CLIENT_SECRET: str | None = None
+    OIDC_SCOPES: str = "openid email profile"
+    OIDC_REDIRECT_URI: str | None = None
+    OIDC_PROVIDER_NAME: str = "SSO"
+    # When a never-seen-before user lands via SSO, auto-create their
+    # row with this role (looked up by name). Set blank to require
+    # admin pre-provisioning instead.
+    OIDC_DEFAULT_ROLE_NAME: str = "Viewer"
+
+    # Sentry — leave SENTRY_DSN unset to disable error reporting
+    # entirely; the SDK is then never initialised and zero outbound
+    # traffic happens. Set to your Sentry project's DSN to turn it on.
+    # SENTRY_ENVIRONMENT defaults to "development"; override in
+    # staging/prod so events are tagged. SENTRY_TRACES_SAMPLE_RATE
+    # controls performance-trace volume (0.0–1.0); 0.1 is a sane
+    # starting point for prod, 0.0 disables traces but keeps errors.
+    SENTRY_DSN: str | None = None
+    SENTRY_ENVIRONMENT: str = "development"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    SENTRY_RELEASE: str | None = None
 
     # Mail — "console" writes emails to the logger (dev default); "smtp"
     # actually delivers via an SMTP relay.

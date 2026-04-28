@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -23,6 +24,21 @@ from app.schemas.user import (
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+# ── Bulk operation schemas ─────────────────────────────────────────────────
+
+
+class _BulkIds(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500, description="User IDs")
+
+
+class _BulkSetActive(_BulkIds):
+    is_active: bool = Field(description="True to activate, false to deactivate")
+
+
+class _BulkSetRole(_BulkIds):
+    role_id: str = Field(min_length=1, description="Target role ID")
 
 
 # Admin-only access for the lifecycle / destructive endpoints.
@@ -190,3 +206,73 @@ async def change_my_password(
         new_password=body.new_password,
     )
     return success_response(message="Password changed successfully")
+
+
+# ── Bulk operations (admin-only) ───────────────────────────────────────────
+#
+# All three honour the same self-protection rules as the per-row
+# endpoints: an admin cannot deactivate / role-change / delete
+# themselves. That row is reported in ``failed`` and the rest of the
+# batch proceeds.
+
+
+@router.post(
+    "/bulk-set-active",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Activate or deactivate multiple users",
+)
+async def bulk_set_active_users(
+    payload: _BulkSetActive = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(_AdminOnly),
+) -> dict:
+    service = UserService(db)
+    result = await service.bulk_set_active(
+        payload.ids, payload.is_active, requested_by=current_user["id"]
+    )
+    label = "activated" if payload.is_active else "deactivated"
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} user(s) {label}",
+    )
+
+
+@router.post(
+    "/bulk-set-role",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Assign multiple users to a single role",
+)
+async def bulk_set_role_users(
+    payload: _BulkSetRole = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(_AdminOnly),
+) -> dict:
+    service = UserService(db)
+    result = await service.bulk_set_role(
+        payload.ids, payload.role_id, requested_by=current_user["id"]
+    )
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} user(s) updated",
+    )
+
+
+@router.post(
+    "/bulk-delete",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete multiple users",
+)
+async def bulk_delete_users(
+    payload: _BulkIds = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(_AdminOnly),
+) -> dict:
+    service = UserService(db)
+    result = await service.bulk_delete(payload.ids, requested_by=current_user["id"])
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} user(s) deleted",
+    )

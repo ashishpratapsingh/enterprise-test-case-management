@@ -62,6 +62,25 @@ export const testRunService = {
     const response = await api.post(`${PREFIX}/${id}/block`);
     return response.data.data;
   },
+
+  // ── Bulk operations ─────────────────────────────────────────────────
+  async bulkDelete(
+    ids: string[],
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-delete`, { ids });
+    return response.data.data;
+  },
+
+  async bulkCancel(
+    ids: string[],
+    abortReason?: string,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-cancel`, {
+      ids,
+      abort_reason: abortReason || null,
+    });
+    return response.data.data;
+  },
 };
 
 export default testRunService;

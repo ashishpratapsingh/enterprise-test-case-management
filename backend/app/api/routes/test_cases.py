@@ -3,13 +3,40 @@
 
 
 from fastapi import APIRouter, Body, Depends, File, Query, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
+from app.core.exceptions import ValidationError
 from app.services.test_case_service import TestCaseService
 from app.utils.helpers import build_filters
 
 router = APIRouter(prefix="/testcases", tags=["Test Cases"])
+
+
+# ── Bulk operation schemas ─────────────────────────────────────────────────
+
+
+class _BulkIds(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500, description="Test case IDs")
+
+
+class _BulkApprovalTransition(_BulkIds):
+    status: str = Field(min_length=1, max_length=30)
+
+
+class _BulkUpdate(_BulkIds):
+    """Plain-field bulk edit. Status (approval) goes through its own
+    endpoint because of the workflow rules. ``unassign=true`` forces
+    assignee → null; otherwise omit ``assigned_to`` to leave it
+    untouched."""
+    priority: str | None = Field(default=None, max_length=30)
+    type_: str | None = Field(default=None, max_length=50, alias="type")
+    automation_status: str | None = Field(default=None, max_length=30)
+    assigned_to: str | None = Field(default=None, description="Target user ID")
+    unassign: bool = Field(default=False, description="Force-clear the assignee")
+
+    model_config = {"populate_by_name": True}
 
 
 @router.get(
@@ -270,4 +297,87 @@ async def bulk_upload_test_cases(
     return success_response(
         data={"created": len(created), "failed": len(errors), "errors": errors},
         message=f"{len(created)} test case(s) created, {len(errors)} failed",
+    )
+
+
+# ── Bulk operations ────────────────────────────────────────────────────────
+#
+# Each endpoint accepts up to 500 IDs and returns a structured
+# {succeeded, failed} report. Per-id failures (NotFound, illegal
+# transition, validation) are non-fatal — the route always returns 200
+# with the partial result so the UI can show progress.
+
+
+@router.post(
+    "/bulk-delete",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete multiple test cases",
+)
+async def bulk_delete_test_cases(
+    payload: _BulkIds = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = TestCaseService(db)
+    result = await service.bulk_delete(payload.ids)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} test case(s) deleted",
+    )
+
+
+@router.post(
+    "/bulk-transition",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Run the approval-workflow transition on multiple test cases",
+)
+async def bulk_transition_test_cases(
+    payload: _BulkApprovalTransition = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = TestCaseService(db)
+    result = await service.bulk_transition_approval(payload.ids, payload.status)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} test case(s) transitioned to '{payload.status}'",
+    )
+
+
+@router.post(
+    "/bulk-update",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-update plain fields (priority, type, automation_status, assignee)",
+)
+async def bulk_update_test_cases(
+    payload: _BulkUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    has_change = (
+        payload.priority is not None
+        or payload.type_ is not None
+        or payload.automation_status is not None
+        or payload.assigned_to is not None
+        or payload.unassign
+    )
+    if not has_change:
+        raise ValidationError(
+            "At least one of priority, type, automation_status, assigned_to, or unassign must be provided"
+        )
+    service = TestCaseService(db)
+    result = await service.bulk_update(
+        payload.ids,
+        priority=payload.priority,
+        type_=payload.type_,
+        automation_status=payload.automation_status,
+        assigned_to=payload.assigned_to,
+        unassign=payload.unassign,
+    )
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} test case(s) updated",
     )

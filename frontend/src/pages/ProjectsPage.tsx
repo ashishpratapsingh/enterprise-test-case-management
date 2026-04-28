@@ -16,14 +16,26 @@ import {
   Select,
   MenuItem,
   FormHelperText,
+  Grid,
+  Divider,
+  IconButton,
 } from '@mui/material';
-import { Add as AddIcon, FilterList as FilterIcon, Search as SearchIcon, Clear as ClearIcon, FileDownload as ExportIcon } from '@mui/icons-material';
+import {
+  Add as AddIcon,
+  FilterList as FilterIcon,
+  Search as SearchIcon,
+  Clear as ClearIcon,
+  FileDownload as ExportIcon,
+  Close as CloseIcon,
+  Edit as EditIcon,
+} from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import Chip from '@mui/material/Chip';
 import { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import { useSnackbar } from 'notistack';
 import DataTable from '../components/common/DataTable';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import ViewDialog from '../components/common/ViewDialog';
 import projectService from '../services/projectService';
 import { Project } from '../types';
 import { useAuth } from '../hooks/useAuth';
@@ -48,6 +60,11 @@ const ProjectsPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Partial<Project> | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  // Read-only view dialog opened on row double-click. Holds the row data
+  // directly — no extra fetch needed since the listing returns full rows.
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewProject, setViewProject] = useState<any>(null);
 
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
@@ -281,6 +298,22 @@ const ProjectsPage: React.FC = () => {
       : []),
   ];
 
+  const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <Box sx={{ mb: 1.5 }}>
+      <Typography
+        variant="caption"
+        fontWeight={700}
+        color="text.secondary"
+        sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}
+      >
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ mt: 0.3, whiteSpace: 'pre-wrap' }}>
+        {value || '—'}
+      </Typography>
+    </Box>
+  );
+
   const handleExportExcel = async () => {
     try {
       const res = await projectService.getAll({
@@ -313,7 +346,13 @@ const ProjectsPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" fontWeight={600}>
+        <Typography
+          variant="h4"
+          fontWeight={600}
+          sx={(theme) => ({
+            color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          })}
+        >
           Projects
         </Typography>
         <Box display="flex" gap={1}>
@@ -389,6 +428,13 @@ const ProjectsPage: React.FC = () => {
         )}
       </Box>
 
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open project details.
+      </Typography>
       <DataTable
         rows={projects}
         columns={columns}
@@ -397,6 +443,10 @@ const ProjectsPage: React.FC = () => {
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
         getRowId={(row) => row.id}
+        onRowDoubleClick={({ row }) => {
+          setViewProject(row);
+          setViewDialogOpen(true);
+        }}
       />
 
       {/* Create/Edit Dialog */}
@@ -508,6 +558,95 @@ const ProjectsPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Project Detail (read-only). Double-clicking a row opens this. */}
+      <ViewDialog
+        open={viewDialogOpen}
+        onClose={() => setViewDialogOpen(false)}
+        title={
+          <>
+            <Typography variant="h6" fontWeight={700} component="span">
+              {viewProject?.name || 'Project'}
+            </Typography>
+            {viewProject?.code && (
+              <Chip
+                label={viewProject.code}
+                size="small"
+                sx={{ fontWeight: 600, bgcolor: 'action.selected' }}
+              />
+            )}
+            {viewProject && (
+              <Chip
+                label={viewProject.is_active ? 'Active' : 'Inactive'}
+                size="small"
+                sx={{
+                  fontWeight: 600,
+                  backgroundColor: viewProject.is_active ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  color: viewProject.is_active ? '#10b981' : '#ef4444',
+                  border: `1px solid ${viewProject.is_active ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                }}
+              />
+            )}
+          </>
+        }
+        onEdit={
+          userCanEdit && viewProject
+            ? () => {
+                setEditingProject({
+                  ...viewProject,
+                  isActive: viewProject.is_active ?? viewProject.isActive ?? true,
+                  category: viewProject.category || '',
+                });
+                setViewDialogOpen(false);
+                setDialogOpen(true);
+              }
+            : undefined
+        }
+      >
+        {viewProject && (
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Category" value={viewProject.category} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow
+                label="Created By"
+                value={
+                  viewProject.creator_name ||
+                  viewProject.creator_email ||
+                  (user && String(viewProject.created_by) === String(user.id)
+                    ? user.full_name || user.email
+                    : viewProject.created_by)
+                }
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow
+                label="Created"
+                value={
+                  viewProject.created_at
+                    ? format(new Date(viewProject.created_at), 'MMM dd, yyyy HH:mm')
+                    : null
+                }
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow
+                label="Last Updated"
+                value={
+                  viewProject.updated_at
+                    ? format(new Date(viewProject.updated_at), 'MMM dd, yyyy HH:mm')
+                    : null
+                }
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+              <DetailRow label="Description" value={viewProject.description} />
+            </Grid>
+          </Grid>
+        )}
+      </ViewDialog>
 
       {/* Delete Confirmation */}
       <ConfirmDialog

@@ -113,3 +113,36 @@ class TestRunService:
         if run is None:
             raise NotFoundError(f"Test run with id '{run_id}' not found")
         return run
+
+    # ── Bulk operations ─────────────────────────────────────────────────
+    #
+    # Same partial-success contract as the other bulk endpoints:
+    # per-row failures (NotFound, illegal transition) land in
+    # ``failed`` and never abort the batch.
+
+    async def bulk_delete(self, run_ids: list[Any]) -> dict[str, list]:
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for rid in run_ids:
+            try:
+                await self.delete_test_run(rid)
+                succeeded.append(str(rid))
+            except NotFoundError as e:
+                failed.append({"id": str(rid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_cancel(
+        self, run_ids: list[Any], abort_reason: str | None = None
+    ) -> dict[str, list]:
+        """Transition each run to Cancelled. Runs already in
+        Completed (a terminal state with no allowed transitions) and
+        unknown ids are reported as failed."""
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for rid in run_ids:
+            try:
+                await self.transition_status(rid, "Cancelled", abort_reason=abort_reason)
+                succeeded.append(str(rid))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(rid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}

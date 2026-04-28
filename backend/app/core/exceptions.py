@@ -60,6 +60,24 @@ class ConflictError(AppException):
         super().__init__(message=message, status_code=409, errors=errors)
 
 
+class IntegrationError(AppException):
+    """Outbound integration failure (HTTP 502 — Bad Gateway).
+
+    Raised when a third-party service like JIRA / Bitbucket / a mail
+    relay returns a non-success response or is unreachable. The
+    message intentionally avoids leaking the upstream's verbatim
+    response so we don't echo internal hostnames or tokens back to
+    the API caller.
+    """
+
+    def __init__(
+        self,
+        message: str = "Upstream integration error",
+        errors: list[Any] | None = None,
+    ) -> None:
+        super().__init__(message=message, status_code=502, errors=errors)
+
+
 # ---------------------------------------------------------------------------
 # FastAPI exception handlers
 # ---------------------------------------------------------------------------

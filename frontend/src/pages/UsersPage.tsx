@@ -43,6 +43,7 @@ import { useSnackbar } from 'notistack';
 import { format } from 'date-fns';
 import DataTable, { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import ViewDialog from '../components/common/ViewDialog';
 import userService from '../services/userService';
 import roleService from '../services/roleService';
 import { useAuth } from '../hooks/useAuth';
@@ -126,6 +127,20 @@ const UsersPage: React.FC = () => {
 
   // Delete confirm
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; user: UserRow | null }>({ open: false, user: null });
+
+  // Read-only detail dialog opened on row double-click. Holds the row
+  // directly — no extra fetch needed.
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewUser, setViewUser] = useState<UserRow | null>(null);
+
+  // ── Bulk operations (admin-only) ───────────────────────────────────────
+  // Backend self-protection rules apply: an admin can never deactivate /
+  // role-change / delete themselves; that row lands in `failed`.
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [userBulkBusy, setUserBulkBusy] = useState(false);
+  const [userBulkDeleteConfirm, setUserBulkDeleteConfirm] = useState(false);
+  const [userBulkRoleOpen, setUserBulkRoleOpen] = useState(false);
+  const [userBulkRoleId, setUserBulkRoleId] = useState('');
 
   // Load roles once
   useEffect(() => {
@@ -262,6 +277,79 @@ const UsersPage: React.FC = () => {
       fetchUsers();
     } catch (err: any) {
       enqueueSnackbar(err?.response?.data?.message || 'Failed to delete user', { variant: 'error' });
+    }
+  };
+
+  // ── Bulk handlers ────────────────────────────────────────────────────
+  const reportUserBulkResult = (
+    label: string,
+    r: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (r.succeeded.length > 0) {
+      enqueueSnackbar(`${r.succeeded.length} user(s) ${label}`, { variant: 'success' });
+    }
+    if (r.failed.length > 0) {
+      // Self-protection failures are common ("You cannot deactivate
+      // your own account"); show the first message verbatim.
+      enqueueSnackbar(
+        `${r.failed.length} user(s) skipped: ${r.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleUserBulkSetActive = async (isActive: boolean) => {
+    if (selectedUserIds.length === 0) return;
+    setUserBulkBusy(true);
+    try {
+      const r = await userService.bulkSetActive(selectedUserIds, isActive);
+      reportUserBulkResult(isActive ? 'activated' : 'deactivated', r);
+      setSelectedUserIds([]);
+      fetchUsers();
+    } catch {
+      enqueueSnackbar('Bulk update failed', { variant: 'error' });
+    } finally {
+      setUserBulkBusy(false);
+    }
+  };
+
+  const openUserBulkRole = () => {
+    setUserBulkRoleId('');
+    setUserBulkRoleOpen(true);
+  };
+
+  const handleUserBulkRoleApply = async () => {
+    if (selectedUserIds.length === 0 || !userBulkRoleId) return;
+    setUserBulkBusy(true);
+    try {
+      const r = await userService.bulkSetRole(selectedUserIds, userBulkRoleId);
+      reportUserBulkResult('updated', r);
+      setSelectedUserIds([]);
+      setUserBulkRoleOpen(false);
+      fetchUsers();
+    } catch (err: any) {
+      enqueueSnackbar(
+        err?.response?.data?.message || 'Bulk role assignment failed',
+        { variant: 'error' },
+      );
+    } finally {
+      setUserBulkBusy(false);
+    }
+  };
+
+  const handleUserBulkDelete = async () => {
+    if (selectedUserIds.length === 0) return;
+    setUserBulkBusy(true);
+    try {
+      const r = await userService.bulkDelete(selectedUserIds);
+      reportUserBulkResult('deleted', r);
+      setSelectedUserIds([]);
+      setUserBulkDeleteConfirm(false);
+      fetchUsers();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setUserBulkBusy(false);
     }
   };
 
@@ -500,7 +588,13 @@ const UsersPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main' }}>
+        <Typography
+          variant="h4"
+          fontWeight={600}
+          sx={(theme) => ({
+            color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          })}
+        >
           User Management
         </Typography>
         {isAdmin && (
@@ -580,6 +674,132 @@ const UsersPage: React.FC = () => {
         </Box>
       </Paper>
 
+      {/* Bulk action bar — admin-only. Backend self-protection still
+          applies, so the admin can never accidentally lock themselves
+          out via bulk actions. */}
+      {isAdmin && selectedUserIds.length > 0 && (
+        <Box
+          role="toolbar"
+          aria-label="User bulk actions"
+          mb={1.5}
+          px={2}
+          py={1}
+          display="flex"
+          alignItems="center"
+          gap={1.5}
+          sx={{
+            borderRadius: 2,
+            backgroundColor: 'rgba(245, 124, 0, 0.08)',
+            border: '1px solid rgba(245, 124, 0, 0.3)',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedUserIds.length} selected
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="success"
+            onClick={() => handleUserBulkSetActive(true)}
+            disabled={userBulkBusy}
+          >
+            Activate
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            onClick={() => handleUserBulkSetActive(false)}
+            disabled={userBulkBusy}
+          >
+            Deactivate
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={openUserBulkRole}
+            disabled={userBulkBusy}
+          >
+            Change role…
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setUserBulkDeleteConfirm(true)}
+            disabled={userBulkBusy}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button
+            size="small"
+            onClick={() => setSelectedUserIds([])}
+            disabled={userBulkBusy}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
+
+      <ConfirmDialog
+        open={userBulkDeleteConfirm}
+        title={`Delete ${selectedUserIds.length} user(s)?`}
+        message="This soft-deletes every selected user. Your own account will be skipped automatically. The action is reversible only via direct DB access."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setUserBulkDeleteConfirm(false)}
+        onConfirm={handleUserBulkDelete}
+      />
+
+      {/* Bulk role-change dialog */}
+      <Dialog
+        open={userBulkRoleOpen}
+        onClose={() => !userBulkBusy && setUserBulkRoleOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Change role for {selectedUserIds.length} user{selectedUserIds.length === 1 ? '' : 's'}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            All selected users (except your own account) will be reassigned to the role below.
+          </Typography>
+          <FormControl fullWidth size="small" required>
+            <InputLabel sx={labelStyle}>Role</InputLabel>
+            <Select
+              label="Role"
+              value={userBulkRoleId}
+              onChange={(e) => setUserBulkRoleId(e.target.value)}
+            >
+              {roles.map((r) => (
+                <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUserBulkRoleOpen(false)} disabled={userBulkBusy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleUserBulkRoleApply}
+            disabled={userBulkBusy || !userBulkRoleId}
+          >
+            {userBulkBusy ? 'Applying…' : `Apply to ${selectedUserIds.length}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open user details.
+      </Typography>
       {/* Table */}
       <DataTable
         rows={users}
@@ -590,7 +810,177 @@ const UsersPage: React.FC = () => {
         onPaginationModelChange={setPaginationModel}
         getRowId={(row: any) => row.id}
         density="comfortable"
+        onRowDoubleClick={({ row }) => {
+          setViewUser(row as UserRow);
+          setViewDialogOpen(true);
+        }}
+        checkboxSelection={isAdmin}
+        rowSelectionModel={selectedUserIds}
+        onRowSelectionModelChange={setSelectedUserIds}
       />
+
+      {/* ── User Detail (read-only) ────────────────────────────────────── */}
+      <ViewDialog
+        open={viewDialogOpen}
+        onClose={() => setViewDialogOpen(false)}
+        maxWidth="sm"
+        title={
+          viewUser
+            ? (() => {
+                const style = ROLE_STYLE[roleSlug(viewUser.role_name)] || ROLE_STYLE.viewer;
+                return (
+                  <Box display="flex" alignItems="center" gap={1.5} flex={1}>
+                    <Avatar
+                      sx={{
+                        width: 44,
+                        height: 44,
+                        bgcolor: style.bg,
+                        color: style.color,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        border: `1px solid ${style.border}`,
+                      }}
+                    >
+                      {initialsOf(viewUser.full_name)}
+                    </Avatar>
+                    <Box minWidth={0} flex={1}>
+                      <Typography variant="h6" fontWeight={700} noWrap>
+                        {viewUser.full_name || '—'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                        {viewUser.email}
+                      </Typography>
+                    </Box>
+                  </Box>
+                );
+              })()
+            : 'User'
+        }
+        onEdit={
+          isAdmin && viewUser
+            ? () => {
+                setViewDialogOpen(false);
+                openEditDialog(viewUser);
+              }
+            : undefined
+        }
+      >
+        {viewUser && (
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}
+              >
+                Role
+              </Typography>
+              {(() => {
+                const style = ROLE_STYLE[roleSlug(viewUser.role_name)] || ROLE_STYLE.viewer;
+                return (
+                  <Chip
+                    label={viewUser.role_name || '—'}
+                    size="small"
+                    sx={{
+                      mt: 0.5,
+                      fontWeight: 700,
+                      fontSize: 11,
+                      bgcolor: style.bg,
+                      color: style.color,
+                      border: `1px solid ${style.border}`,
+                    }}
+                  />
+                );
+              })()}
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}
+              >
+                Status
+              </Typography>
+              <Chip
+                label={viewUser.is_active ? 'Active' : 'Inactive'}
+                size="small"
+                sx={{
+                  mt: 0.5,
+                  fontWeight: 700,
+                  fontSize: 11,
+                  bgcolor: viewUser.is_active ? 'rgba(16,185,129,0.1)' : 'rgba(107,114,128,0.1)',
+                  color: viewUser.is_active ? '#059669' : '#6b7280',
+                  border: `1px solid ${viewUser.is_active ? 'rgba(16,185,129,0.3)' : 'rgba(107,114,128,0.25)'}`,
+                }}
+              />
+            </Grid>
+            {(() => {
+              const role = roleById[viewUser.role_id];
+              return role?.description ? (
+                <Grid item xs={12}>
+                  <Typography
+                    variant="caption"
+                    fontWeight={700}
+                    color="text.secondary"
+                    sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}
+                  >
+                    Role Description
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 0.3, whiteSpace: 'pre-wrap' }}>
+                    {role.description}
+                  </Typography>
+                </Grid>
+              ) : null;
+            })()}
+            <Grid item xs={12}>
+              <Divider />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}
+              >
+                Created
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 0.3 }}>
+                {(() => {
+                  if (!viewUser.created_at) return '—';
+                  try {
+                    return format(new Date(viewUser.created_at), 'MMM dd, yyyy HH:mm');
+                  } catch {
+                    return '—';
+                  }
+                })()}
+              </Typography>
+            </Grid>
+            {viewUser.updated_at && (
+              <Grid item xs={12} sm={6}>
+                <Typography
+                  variant="caption"
+                  fontWeight={700}
+                  color="text.secondary"
+                  sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}
+                >
+                  Last Updated
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.3 }}>
+                  {(() => {
+                    try {
+                      return format(new Date(viewUser.updated_at), 'MMM dd, yyyy HH:mm');
+                    } catch {
+                      return '—';
+                    }
+                  })()}
+                </Typography>
+              </Grid>
+            )}
+          </Grid>
+        )}
+      </ViewDialog>
 
       {/* ── Create / Edit Dialog ───────────────────────────────────────── */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>

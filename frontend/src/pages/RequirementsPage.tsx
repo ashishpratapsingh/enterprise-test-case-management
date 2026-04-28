@@ -1,28 +1,45 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
+  Alert,
   Box,
   Typography,
   Tabs,
   Tab,
   Button,
   Chip,
+  Checkbox,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
   FormControl,
+  FormControlLabel,
   InputLabel,
   Select,
   MenuItem,
   Grid,
   FormHelperText,
+  Divider,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
-import { Add as AddIcon, FilterList as FilterIcon, Search as SearchIcon, Clear as ClearIcon, FileDownload as ExportIcon } from '@mui/icons-material';
+import {
+  Add as AddIcon,
+  FilterList as FilterIcon,
+  Search as SearchIcon,
+  Clear as ClearIcon,
+  FileDownload as ExportIcon,
+  Close as CloseIcon,
+  Edit as EditIcon,
+} from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import DataTable from '../components/common/DataTable';
+import useBulkEdit, { BulkFieldSpec } from '../hooks/useBulkEdit';
+import BulkEditDialog from '../components/common/BulkEditDialog';
+import ViewDialog from '../components/common/ViewDialog';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import epicService from '../services/epicService';
 import userStoryService from '../services/userStoryService';
@@ -51,6 +68,12 @@ const PRIORITY_CONFIG: Record<string, { bg: string; color: string; border: strin
   medium: { bg: 'rgba(59,130,246,0.08)', color: '#2563eb', border: 'rgba(59,130,246,0.3)' },
   low: { bg: 'rgba(16,185,129,0.08)', color: '#059669', border: 'rgba(16,185,129,0.3)' },
 };
+
+// Agile estimation Fibonacci scale up to 13. Used by both the per-story
+// create/edit dialog and the User Stories bulk-edit dialog so the
+// allowed set is consistent. Backend mirrors this in
+// ``app/services/user_story_service.py``.
+const ALLOWED_STORY_POINTS: number[] = [0, 1, 2, 3, 5, 8, 13];
 
 interface UserOption {
   id: string;
@@ -148,10 +171,31 @@ const RequirementsPage: React.FC = () => {
     assignedTo: '',
   });
 
+  // Read-only detail dialogs (opened via row double-click). Hold the
+  // raw row data — no second fetch needed since list rows include
+  // everything the detail view shows.
+  const [epicViewDialogOpen, setEpicViewDialogOpen] = useState(false);
+  const [viewEpic, setViewEpic] = useState<any>(null);
+  const [storyViewDialogOpen, setStoryViewDialogOpen] = useState(false);
+  const [viewStory, setViewStory] = useState<any>(null);
+
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteType, setDeleteType] = useState<'epic' | 'story'>('epic');
+
+  // ── User-stories bulk operations (JIRA-style) ─────────────────────────
+  // Same shape as DefectsPage / TestCasesPage: a single dialog with
+  // per-field "change?" checkboxes, partial-success result panel, and an
+  // inline destructive Delete button outside the dialog.
+  const STORY_BULK_MAX = 500;
+  const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([]);
+  const [storyBulkBusy, setStoryBulkBusy] = useState(false);
+  const [storyBulkDeleteConfirm, setStoryBulkDeleteConfirm] = useState(false);
+  const [storyBulkEditOpen, setStoryBulkEditOpen] = useState(false);
+  const [storyBulkResult, setStoryBulkResult] = useState<null | {
+    perField: { field: string; succeeded: number; failed: number; firstError?: string }[];
+  }>(null);
 
   // Load users
   useEffect(() => {
@@ -480,6 +524,193 @@ const RequirementsPage: React.FC = () => {
     }
   };
 
+  // ── User-stories bulk handlers ──────────────────────────────────────────
+
+  const reportStoryBulkResult = (
+    label: string,
+    r: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (r.succeeded.length > 0) {
+      enqueueSnackbar(`${r.succeeded.length} user story(ies) ${label}`, { variant: 'success' });
+    }
+    if (r.failed.length > 0) {
+      enqueueSnackbar(
+        `${r.failed.length} user story(ies) skipped: ${r.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleStoryBulkDelete = async () => {
+    if (selectedStoryIds.length === 0) return;
+    setStoryBulkBusy(true);
+    try {
+      const r = await userStoryService.bulkDelete(selectedStoryIds);
+      reportStoryBulkResult('deleted', r);
+      setSelectedStoryIds([]);
+      setStoryBulkDeleteConfirm(false);
+      fetchUserStories();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setStoryBulkBusy(false);
+    }
+  };
+
+  // Story points input is a select restricted to the Fibonacci scale.
+  // Empty value = clear; the apply handler maps that to the
+  // ``clear_story_points`` flag. The custom validate is defensive —
+  // the dropdown already prevents typos.
+  const validateStoryPoints = (raw: string): string | undefined => {
+    if (raw === '') return undefined; // clears — legitimate
+    if (!ALLOWED_STORY_POINTS.includes(Number(raw))) {
+      return `Must be one of: ${ALLOWED_STORY_POINTS.join(', ')}`;
+    }
+    return undefined;
+  };
+
+  const storyBulkFields: BulkFieldSpec[] = [
+    {
+      key: 'status',
+      label: 'Change status',
+      type: 'select',
+      options: [
+        { value: 'open', label: 'Open' },
+        { value: 'in_progress', label: 'In Progress' },
+        { value: 'done', label: 'Done' },
+        { value: 'closed', label: 'Closed' },
+      ],
+    },
+    {
+      key: 'priority',
+      label: 'Change priority',
+      type: 'select',
+      options: [
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'critical', label: 'Critical' },
+      ],
+    },
+    {
+      key: 'storyPoints',
+      label: 'Change story points',
+      type: 'select',
+      // Empty value = clear story points; Fibonacci-only otherwise.
+      required: false,
+      validate: validateStoryPoints,
+      helperText: `Fibonacci scale: ${ALLOWED_STORY_POINTS.join(', ')}`,
+      options: [
+        { value: '', label: 'None (clear)' },
+        ...ALLOWED_STORY_POINTS.map((sp) => ({ value: String(sp), label: String(sp) })),
+      ],
+    },
+    {
+      key: 'epicId',
+      label: 'Change epic',
+      type: 'select',
+      // Empty value = clear epic linkage.
+      required: false,
+      options: [
+        { value: '', label: 'No epic' },
+        ...allEpics.map((e) => ({ value: e.id, label: e.title })),
+      ],
+    },
+    {
+      key: 'assignedTo',
+      label: 'Change assignee',
+      type: 'select',
+      required: false, // empty = unassign
+      options: [
+        { value: '', label: 'Unassigned' },
+        ...users.map((u) => ({ value: u.id, label: u.full_name || u.email })),
+      ],
+    },
+  ];
+  const storyBulkEdit = useBulkEdit(storyBulkFields);
+
+  const openStoryBulkEdit = () => {
+    storyBulkEdit.reset();
+    setStoryBulkResult(null);
+    setStoryBulkEditOpen(true);
+  };
+
+  const handleStoryBulkApply = async () => {
+    if (selectedStoryIds.length === 0) return;
+    type FieldResult = { field: string; succeeded: number; failed: number; firstError?: string };
+    const summarize = (
+      label: string,
+      r: { succeeded: string[]; failed: { id: string; error: string }[] },
+    ): FieldResult => ({
+      field: label,
+      succeeded: r.succeeded.length,
+      failed: r.failed.length,
+      firstError: r.failed[0]?.error,
+    });
+
+    const changes = storyBulkEdit.changedFields;
+    setStoryBulkBusy(true);
+    const perField: FieldResult[] = [];
+    try {
+      const fields: {
+        status?: string; priority?: string;
+        epic_id?: string; clear_epic?: boolean;
+        assigned_to?: string; unassign?: boolean;
+        story_points?: number; clear_story_points?: boolean;
+      } = {};
+      const labels: string[] = [];
+      if (changes.status) {
+        fields.status = changes.status;
+        labels.push(`Status → ${changes.status}`);
+      }
+      if (changes.priority) {
+        fields.priority = changes.priority;
+        labels.push(`Priority → ${changes.priority}`);
+      }
+      if ('epicId' in changes) {
+        if (changes.epicId) {
+          fields.epic_id = changes.epicId;
+          const ep = allEpics.find((e) => e.id === changes.epicId);
+          labels.push(`Epic → ${ep?.title || changes.epicId}`);
+        } else {
+          fields.clear_epic = true;
+          labels.push('Epic → (none)');
+        }
+      }
+      if ('assignedTo' in changes) {
+        if (changes.assignedTo) {
+          fields.assigned_to = changes.assignedTo;
+          const u = users.find((u) => u.id === changes.assignedTo);
+          labels.push(`Assignee → ${u?.full_name || u?.email || changes.assignedTo}`);
+        } else {
+          fields.unassign = true;
+          labels.push('Assignee → Unassigned');
+        }
+      }
+      if ('storyPoints' in changes) {
+        if (changes.storyPoints === '') {
+          fields.clear_story_points = true;
+          labels.push('Story Points → (none)');
+        } else {
+          const n = Number(changes.storyPoints);
+          fields.story_points = n;
+          labels.push(`Story Points → ${n}`);
+        }
+      }
+      if (Object.keys(fields).length > 0) {
+        const r = await userStoryService.bulkUpdate(selectedStoryIds, fields);
+        perField.push(summarize(labels.join(' / '), r));
+      }
+      setStoryBulkResult({ perField });
+      setSelectedStoryIds([]);
+      fetchUserStories();
+    } catch {
+      enqueueSnackbar('Bulk update failed', { variant: 'error' });
+    } finally {
+      setStoryBulkBusy(false);
+    }
+  };
+
   const handleCloneStory = async (row: any) => {
     try {
       const payload = {
@@ -570,6 +801,40 @@ const RequirementsPage: React.FC = () => {
   };
 
   // Columns
+  const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <Box sx={{ mb: 1.5 }}>
+      <Typography
+        variant="caption"
+        fontWeight={700}
+        color="text.secondary"
+        sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}
+      >
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ mt: 0.3, whiteSpace: 'pre-wrap' }}>
+        {value || '—'}
+      </Typography>
+    </Box>
+  );
+
+  const formatDateOnly = (raw: string | null | undefined) => {
+    if (!raw) return null;
+    try {
+      return format(new Date(raw), 'MMM dd, yyyy');
+    } catch {
+      return null;
+    }
+  };
+
+  const formatDateTime = (raw: string | null | undefined) => {
+    if (!raw) return null;
+    try {
+      return format(new Date(raw), 'MMM dd, yyyy HH:mm');
+    } catch {
+      return null;
+    }
+  };
+
   const epicColumns: GridColDef[] = [
     {
       field: 'id',
@@ -908,7 +1173,14 @@ const RequirementsPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Requirements
       </Typography>
 
@@ -1006,6 +1278,13 @@ const RequirementsPage: React.FC = () => {
             )}
           </Box>
         </Box>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+        >
+          Tip: double-click a row to open epic details.
+        </Typography>
         <DataTable
           rows={epics}
           columns={epicColumns}
@@ -1014,6 +1293,10 @@ const RequirementsPage: React.FC = () => {
           paginationModel={epicsPaginationModel}
           onPaginationModelChange={setEpicsPaginationModel}
           getRowId={(row) => row.id}
+          onRowDoubleClick={({ row }) => {
+            setViewEpic(row);
+            setEpicViewDialogOpen(true);
+          }}
         />
       </TabPanel>
 
@@ -1096,6 +1379,61 @@ const RequirementsPage: React.FC = () => {
             )}
           </Box>
         </Box>
+        {/* Bulk action bar — visible only when stories are selected. */}
+        {userCanEdit && selectedStoryIds.length > 0 && (
+          <Box
+            role="toolbar"
+            aria-label="User story bulk actions"
+            mb={1.5}
+            px={2}
+            py={1}
+            display="flex"
+            alignItems="center"
+            gap={1.5}
+            sx={{
+              borderRadius: 2,
+              backgroundColor: 'rgba(245, 124, 0, 0.08)',
+              border: '1px solid rgba(245, 124, 0, 0.3)',
+            }}
+          >
+            <Typography variant="body2" fontWeight={600}>
+              {selectedStoryIds.length} selected
+            </Typography>
+            <Button
+              size="small"
+              variant="contained"
+              onClick={openStoryBulkEdit}
+              disabled={storyBulkBusy}
+            >
+              Bulk update…
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              onClick={() => setStoryBulkDeleteConfirm(true)}
+              disabled={storyBulkBusy}
+            >
+              Delete
+            </Button>
+            <Box flexGrow={1} />
+            <Button
+              size="small"
+              onClick={() => setSelectedStoryIds([])}
+              disabled={storyBulkBusy}
+            >
+              Clear
+            </Button>
+          </Box>
+        )}
+
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+        >
+          Tip: double-click a row to open user story details.
+        </Typography>
         <DataTable
           rows={userStories}
           columns={storyColumns}
@@ -1104,6 +1442,13 @@ const RequirementsPage: React.FC = () => {
           paginationModel={storiesPaginationModel}
           onPaginationModelChange={setStoriesPaginationModel}
           getRowId={(row) => row.id}
+          onRowDoubleClick={({ row }) => {
+            setViewStory(row);
+            setStoryViewDialogOpen(true);
+          }}
+          checkboxSelection={userCanEdit}
+          rowSelectionModel={selectedStoryIds}
+          onRowSelectionModelChange={setSelectedStoryIds}
         />
       </TabPanel>
 
@@ -1452,7 +1797,7 @@ const RequirementsPage: React.FC = () => {
                   }
                 >
                   <MenuItem value="">None</MenuItem>
-                  {[0, 1, 2, 3, 5, 8, 13].map((point) => (
+                  {ALLOWED_STORY_POINTS.map((point) => (
                     <MenuItem key={point} value={String(point)}>
                       {point}
                     </MenuItem>
@@ -1504,6 +1849,239 @@ const RequirementsPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── Epic Detail (read-only) ────────────────────────────────────────── */}
+      <ViewDialog
+        open={epicViewDialogOpen}
+        onClose={() => setEpicViewDialogOpen(false)}
+        title={
+          <>
+            <Typography variant="h6" fontWeight={700} component="span">
+              {viewEpic?.title || 'Epic'}
+            </Typography>
+            {viewEpic?.priority && (() => {
+              const cfg = PRIORITY_CONFIG[(viewEpic.priority || '').toLowerCase()];
+              return cfg ? (
+                <Chip
+                  label={viewEpic.priority}
+                  size="small"
+                  sx={{
+                    fontWeight: 600,
+                    textTransform: 'capitalize',
+                    backgroundColor: cfg.bg,
+                    color: cfg.color,
+                    border: `1px solid ${cfg.border}`,
+                  }}
+                />
+              ) : null;
+            })()}
+            {viewEpic?.project_code && (
+              <Chip
+                label={viewEpic.project_code}
+                size="small"
+                sx={{ fontWeight: 600, bgcolor: 'action.selected' }}
+              />
+            )}
+          </>
+        }
+        onEdit={
+          userCanEdit && viewEpic
+            ? () => {
+                setEpicViewDialogOpen(false);
+                handleEditEpic(viewEpic);
+              }
+            : undefined
+        }
+      >
+        {viewEpic && (
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Project" value={viewEpic.project_name} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Assignee" value={viewEpic.assignee} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Start Date" value={formatDateOnly(viewEpic.start_date)} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Due Date" value={formatDateOnly(viewEpic.due_date)} />
+            </Grid>
+            <Grid item xs={12}>
+              <DetailRow
+                label="Labels"
+                value={
+                  viewEpic.labels ? (
+                    <Box display="flex" gap={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                      {String(viewEpic.labels)
+                        .split(',')
+                        .map((l: string) => l.trim())
+                        .filter(Boolean)
+                        .map((label: string, i: number) => (
+                          <Chip
+                            key={i}
+                            label={label}
+                            size="small"
+                            sx={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              backgroundColor: 'rgba(245,124,0,0.08)',
+                              color: '#f57c00',
+                              border: '1px solid rgba(245,124,0,0.25)',
+                            }}
+                          />
+                        ))}
+                    </Box>
+                  ) : null
+                }
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Created By" value={viewEpic.created_by_name} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Created" value={formatDateTime(viewEpic.created_at)} />
+            </Grid>
+            {viewEpic.updated_at && (
+              <Grid item xs={12} sm={6}>
+                <DetailRow label="Last Updated" value={formatDateTime(viewEpic.updated_at)} />
+              </Grid>
+            )}
+          </Grid>
+        )}
+      </ViewDialog>
+
+      {/* ── User Story Detail (read-only) ──────────────────────────────────── */}
+      <ViewDialog
+        open={storyViewDialogOpen}
+        onClose={() => setStoryViewDialogOpen(false)}
+        title={
+          <>
+            <Typography variant="h6" fontWeight={700} component="span">
+              {viewStory?.title || 'User Story'}
+            </Typography>
+            {viewStory?.priority && (() => {
+              const cfg = PRIORITY_CONFIG[(viewStory.priority || '').toLowerCase()];
+              return cfg ? (
+                <Chip
+                  label={viewStory.priority}
+                  size="small"
+                  sx={{
+                    fontWeight: 600,
+                    textTransform: 'capitalize',
+                    backgroundColor: cfg.bg,
+                    color: cfg.color,
+                    border: `1px solid ${cfg.border}`,
+                  }}
+                />
+              ) : null;
+            })()}
+            {viewStory?.status && (() => {
+              const val = (viewStory.status || '').toLowerCase();
+              const cfg = STATUS_CONFIG[val] || { bg: 'rgba(107,114,128,0.08)', color: '#6b7280', border: 'rgba(107,114,128,0.3)' };
+              const label = String(viewStory.status).replace('_', ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+              return (
+                <Chip
+                  label={label}
+                  size="small"
+                  sx={{
+                    fontWeight: 600,
+                    backgroundColor: cfg.bg,
+                    color: cfg.color,
+                    border: `1px solid ${cfg.border}`,
+                  }}
+                />
+              );
+            })()}
+            {viewStory?.project_code && (
+              <Chip
+                label={viewStory.project_code}
+                size="small"
+                sx={{ fontWeight: 600, bgcolor: 'action.selected' }}
+              />
+            )}
+          </>
+        }
+        onEdit={
+          userCanEdit && viewStory
+            ? () => {
+                setStoryViewDialogOpen(false);
+                handleEditStory(viewStory);
+              }
+            : undefined
+        }
+      >
+        {viewStory && (
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Project" value={viewStory.project_name} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Epic" value={viewStory.epic_title} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Assignee" value={viewStory.assignee} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow
+                label="Story Points"
+                value={viewStory.story_points != null ? String(viewStory.story_points) : null}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <DetailRow label="Description" value={viewStory.description} />
+            </Grid>
+            <Grid item xs={12}>
+              <DetailRow
+                label="Acceptance Criteria"
+                value={viewStory.acceptance_criteria}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <Divider sx={{ my: 1 }} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Created By" value={viewStory.created_by_name} />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <DetailRow label="Created" value={formatDateTime(viewStory.created_at)} />
+            </Grid>
+            {viewStory.updated_at && (
+              <Grid item xs={12} sm={6}>
+                <DetailRow label="Last Updated" value={formatDateTime(viewStory.updated_at)} />
+              </Grid>
+            )}
+          </Grid>
+        )}
+      </ViewDialog>
+
+      {/* ── User Stories: bulk-delete confirm ────────────────────────────── */}
+      <ConfirmDialog
+        open={storyBulkDeleteConfirm}
+        title={`Delete ${selectedStoryIds.length} user story(ies)?`}
+        message="This soft-deletes every selected user story. The action is reversible only via direct DB access."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setStoryBulkDeleteConfirm(false)}
+        onConfirm={handleStoryBulkDelete}
+      />
+
+      <BulkEditDialog
+        open={storyBulkEditOpen}
+        onClose={() => setStoryBulkEditOpen(false)}
+        entityLabel="user story"
+        entityPlural="user stories"
+        selectionCount={selectedStoryIds.length}
+        bulkMax={STORY_BULK_MAX}
+        fields={storyBulkFields}
+        bulk={storyBulkEdit}
+        busy={storyBulkBusy}
+        onApply={handleStoryBulkApply}
+        result={storyBulkResult}
+      />
 
       {/* ── Delete Confirmation ────────────────────────────────────────────── */}
       <ConfirmDialog

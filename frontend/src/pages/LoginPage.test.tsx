@@ -9,7 +9,16 @@ jest.mock('../services/authService', () => ({
     isAuthenticated: () => false,
     getStoredUser: () => null,
     getStoredToken: () => null,
-    getCurrentUser: jest.fn().mockResolvedValue(null),
+    getCurrentUser: () => Promise.resolve(null),
+    // SSO config defaults to disabled in tests so the form layout
+    // matches the legacy assertions.
+    getSsoConfig: () =>
+      Promise.resolve({
+        enabled: false,
+        provider_name: '',
+        login_url: '/api/v1/auth/sso/login',
+      }),
+    beginSsoLogin: () => undefined,
   },
 }));
 

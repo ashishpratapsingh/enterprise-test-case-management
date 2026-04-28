@@ -223,7 +223,7 @@ describe('DefectsPage', () => {
     await waitFor(() => expect(defectService.getAll).toHaveBeenCalledTimes(2));
   });
 
-  it('bulk status transition sends the chosen status', async () => {
+  it('bulk status transition through the bulk-update dialog sends the chosen status', async () => {
     defectService.bulkTransitionStatus.mockResolvedValue({
       succeeded: ['d-1'],
       failed: [],
@@ -236,13 +236,22 @@ describe('DefectsPage', () => {
     );
     await waitFor(() => expect(defectService.getAll).toHaveBeenCalled());
 
+    // Open the JIRA-style bulk-update dialog from the action bar.
     fireEvent.click(screen.getByLabelText('select-row-d-1'));
     const bar = await screen.findByRole('toolbar', { name: /bulk actions/i });
-    fireEvent.click(within(bar).getByRole('button', { name: /change status/i }));
+    fireEvent.click(within(bar).getByRole('button', { name: /bulk update/i }));
 
-    // Pick "In Progress" from the menu.
-    const inProgress = await screen.findByRole('menuitem', { name: /^in progress$/i });
-    fireEvent.click(inProgress);
+    const dialog = await screen.findByRole('dialog', { name: /bulk update/i });
+
+    // Tick "Change status" then pick "In Progress" from the dialog's
+    // own Status dropdown. The Select carries a stable aria-label so
+    // it can be located unambiguously among the other field selects.
+    fireEvent.click(within(dialog).getByLabelText(/change status/i));
+    fireEvent.mouseDown(within(dialog).getByLabelText('Bulk status selector'));
+    const listbox = await screen.findByRole('listbox');
+    fireEvent.click(within(listbox).getByRole('option', { name: /^in progress$/i }));
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^apply to/i }));
 
     await waitFor(() =>
       expect(defectService.bulkTransitionStatus).toHaveBeenCalledWith(

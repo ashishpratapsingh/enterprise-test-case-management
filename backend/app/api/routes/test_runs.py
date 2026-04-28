@@ -1,6 +1,7 @@
 """Test run management routes."""
 
 from fastapi import APIRouter, Body, Depends, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
@@ -9,6 +10,21 @@ from app.services.test_run_service import TestRunService
 from app.utils.helpers import build_filters
 
 router = APIRouter(prefix="/testruns", tags=["Test Runs"])
+
+
+# ── Bulk operation schemas ─────────────────────────────────────────────────
+
+
+class _BulkIds(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500, description="Test run IDs")
+
+
+class _BulkCancel(_BulkIds):
+    abort_reason: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Optional reason recorded on every cancelled run",
+    )
 
 
 @router.get(
@@ -209,3 +225,44 @@ async def get_run_executions(
         test_run_id=run_id, page=page, page_size=page_size
     )
     return success_response(data=result, message="Executions retrieved successfully")
+
+
+# ── Bulk operations ────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/bulk-delete",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete multiple test runs",
+)
+async def bulk_delete_test_runs(
+    payload: _BulkIds = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = TestRunService(db)
+    result = await service.bulk_delete(payload.ids)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} test run(s) deleted",
+    )
+
+
+@router.post(
+    "/bulk-cancel",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Cancel multiple test runs (with optional shared abort reason)",
+)
+async def bulk_cancel_test_runs(
+    payload: _BulkCancel = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = TestRunService(db)
+    result = await service.bulk_cancel(payload.ids, abort_reason=payload.abort_reason)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} test run(s) cancelled",
+    )

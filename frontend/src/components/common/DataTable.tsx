@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useRef } from 'react';
+import React, { useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   Box,
   CircularProgress,
@@ -19,6 +19,7 @@ import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-communi
 import type {
   ColDef,
   RowClickedEvent,
+  RowDoubleClickedEvent,
   ICellRendererParams,
 } from 'ag-grid-community';
 
@@ -55,6 +56,7 @@ interface DataTableProps {
   paginationModel?: GridPaginationModel;
   onPaginationModelChange?: (model: GridPaginationModel) => void;
   onRowClick?: (params: any) => void;
+  onRowDoubleClick?: (params: any) => void;
   pageSizeOptions?: number[];
   autoHeight?: boolean;
   density?: 'compact' | 'standard' | 'comfortable';
@@ -152,10 +154,12 @@ const DataTable: React.FC<DataTableProps> = ({
   paginationModel = { page: 0, pageSize: 25 },
   onPaginationModelChange,
   onRowClick,
+  onRowDoubleClick,
   pageSizeOptions = [10, 25, 50, 100],
   density = 'standard',
   getRowId,
   checkboxSelection = false,
+  rowSelectionModel,
   onRowSelectionModelChange,
   getRowStyle,
 }) => {
@@ -185,6 +189,52 @@ const DataTable: React.FC<DataTableProps> = ({
     },
     [onRowClick, getRowId],
   );
+
+  // Double-click is treated as "open detail" (industry-standard for tables
+  // backed by editable rows). Same button/anchor guard as single-click so
+  // double-clicking an action button never bubbles into a detail open.
+  const onRowDoubleClicked = useCallback(
+    (event: RowDoubleClickedEvent) => {
+      if (!onRowDoubleClick) return;
+      const target = event.event?.target as HTMLElement | null;
+      if (target && (target.closest('button') || target.closest('a') || target.closest('[role="button"]'))) {
+        return;
+      }
+      onRowDoubleClick({ row: event.data, id: getRowId ? getRowId(event.data) : event.data?.id });
+    },
+    [onRowDoubleClick, getRowId],
+  );
+
+  // Two-way sync: when the parent mutates ``rowSelectionModel`` (e.g.
+  // a "Clear selection" button or fetching a new page), reflect that
+  // back into AG Grid's checkbox state. Without this the React state
+  // and the visible checkboxes drift out of sync — a Clear click wipes
+  // the IDs in state but leaves every checkbox ticked.
+  //
+  // Comparing target vs. current before mutating prevents a feedback
+  // loop with onSelectionChanged below.
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api || !rowSelectionModel) return;
+    const target = new Set(((rowSelectionModel as any[]) || []).map((id: any) => String(id)));
+    const currentRows: any[] = api.getSelectedRows();
+    const currentIds = new Set(
+      currentRows.map((r: any) => String(getRowId ? getRowId(r) : r?.id)),
+    );
+    if (
+      target.size === currentIds.size &&
+      Array.from(target).every((id) => currentIds.has(id))
+    ) {
+      return;
+    }
+    api.forEachNode((node: any) => {
+      const id = String(getRowId ? getRowId(node.data) : node.data?.id);
+      const shouldBeSelected = target.has(id);
+      if (node.isSelected() !== shouldBeSelected) {
+        node.setSelected(shouldBeSelected, false);
+      }
+    });
+  }, [rowSelectionModel, getRowId, rows]);
 
   const getRowIdFn = useMemo(() => {
     if (getRowId) return (params: any) => String(getRowId(params.data));
@@ -265,6 +315,7 @@ const DataTable: React.FC<DataTableProps> = ({
           pagination={false}
           suppressPaginationPanel
           onRowClicked={onRowClicked}
+          onRowDoubleClicked={onRowDoubleClicked}
           rowSelection={
             // AG Grid v32+ object form. ``enableClickSelection: false``
             // replaces the deprecated top-level ``suppressRowClickSelection``.

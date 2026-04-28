@@ -123,22 +123,22 @@ async def seed_admin_user(session: AsyncSession, admin_role_id: uuid.UUID) -> uu
         The admin user's id.
     """
     result = await session.execute(
-        select(User).where(User.email == "admin@tcm.com")
+        select(User).where(User.email == "ashish.pratap@sabpaisa.in")
     )
     admin = result.scalar_one_or_none()
     if admin is None:
         admin = User(
-            email="admin@tcm.com",
+            email="ashish.pratap@sabpaisa.in",
             hashed_password=get_password_hash("Admin@123"),
-            full_name="System Administrator",
+            full_name="Ashish Pratap Singh",
             role_id=admin_role_id,
             is_active=True,
         )
         session.add(admin)
         await session.flush()
-        print("  Created admin user: admin@tcm.com")
+        print("  Created admin user: ashish.pratap@sabpaisa.in")
     else:
-        print("  Admin user already exists: admin@tcm.com")
+        print("  Admin user already exists: ashish.pratap@sabpaisa.in")
     return admin.id
 
 

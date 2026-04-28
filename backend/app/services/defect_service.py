@@ -246,3 +246,39 @@ class DefectService:
             except NotFoundError as e:
                 failed.append({"id": str(did), "error": str(e)})
         return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_update(
+        self,
+        defect_ids: list[Any],
+        *,
+        severity: str | None = None,
+        priority: str | None = None,
+    ) -> dict[str, list]:
+        """Update plain fields (severity, priority) across many defects.
+
+        Status transitions and assignment go through their own endpoints
+        because they each carry domain rules (transition table / FK /
+        notification side-effects). This one is the simple-column
+        update used by the JIRA-style bulk-edit dialog.
+
+        At least one of ``severity`` / ``priority`` must be set —
+        callers shouldn't invoke this with no changes.
+        """
+        if severity is None and priority is None:
+            raise ValidationError("At least one field must be provided to bulk_update")
+
+        update_data: dict[str, Any] = {}
+        if severity is not None:
+            update_data["severity"] = severity
+        if priority is not None:
+            update_data["priority"] = priority
+
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for did in defect_ids:
+            try:
+                await self.update_defect(did, update_data)
+                succeeded.append(str(did))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(did), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}

@@ -123,13 +123,20 @@ class TestSuiteRepository(BaseRepository):
         return list(result.scalars().all())
 
     async def get_with_cases(self, suite_id: uuid.UUID):
-        """Get a test suite with its test_suite_cases and nested test_case eagerly loaded."""
+        """Get a test suite with its test_suite_cases, nested test_case,
+        and the creator User eagerly loaded.
+
+        ``creator`` is needed so the GET-by-id response carries the same
+        ``Created By`` information that the list endpoint already exposes
+        — otherwise the detail dialog renders a blank field.
+        """
         from app.models.test_suite_case import TestSuiteCase
 
         stmt = (
             self._base_query()
             .options(
-                joinedload(self.model.test_suite_cases).joinedload(TestSuiteCase.test_case)
+                joinedload(self.model.test_suite_cases).joinedload(TestSuiteCase.test_case),
+                joinedload(self.model.creator),
             )
             .where(self.model.id == suite_id)
         )

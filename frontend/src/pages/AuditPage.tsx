@@ -499,7 +499,13 @@ const AuditPage: React.FC = () => {
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Box>
-          <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main' }}>
+          <Typography
+            variant="h4"
+            fontWeight={600}
+            sx={(theme) => ({
+              color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+            })}
+          >
             Audit Log
           </Typography>
           <Typography variant="body2" color="text.secondary">

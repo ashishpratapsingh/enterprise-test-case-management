@@ -116,3 +116,73 @@ class TestBulkAssign:
         assert r.status_code == 200
         assert r.json()["data"]["succeeded"] == []
         assert len(r.json()["data"]["failed"]) == 1
+
+
+class TestBulkUpdate:
+    async def test_updates_severity_and_priority_together(
+        self, async_client, auth_headers, test_project
+    ):
+        d1 = await _create_defect(async_client, auth_headers, test_project, title="u1")
+        d2 = await _create_defect(async_client, auth_headers, test_project, title="u2")
+
+        r = await async_client.post(
+            "/api/v1/defects/bulk-update",
+            headers=auth_headers,
+            json={"ids": [d1, d2], "severity": "High", "priority": "Critical"},
+        )
+        assert r.status_code == 200, r.text
+        assert sorted(r.json()["data"]["succeeded"]) == sorted([d1, d2])
+
+        # Confirm the rows actually changed.
+        for did in (d1, d2):
+            view = await async_client.get(
+                f"/api/v1/defects/{did}", headers=auth_headers
+            )
+            assert view.json()["data"]["severity"] == "High"
+            assert view.json()["data"]["priority"] == "Critical"
+
+    async def test_only_priority_leaves_severity_alone(
+        self, async_client, auth_headers, test_project
+    ):
+        d1 = await _create_defect(
+            async_client, auth_headers, test_project, title="p1", severity="Low"
+        )
+
+        r = await async_client.post(
+            "/api/v1/defects/bulk-update",
+            headers=auth_headers,
+            json={"ids": [d1], "priority": "High"},
+        )
+        assert r.status_code == 200
+
+        view = await async_client.get(
+            f"/api/v1/defects/{d1}", headers=auth_headers
+        )
+        assert view.json()["data"]["severity"] == "Low"  # unchanged
+        assert view.json()["data"]["priority"] == "High"
+
+    async def test_no_fields_returns_422(
+        self, async_client, auth_headers, test_project
+    ):
+        d1 = await _create_defect(async_client, auth_headers, test_project, title="z1")
+        r = await async_client.post(
+            "/api/v1/defects/bulk-update",
+            headers=auth_headers,
+            json={"ids": [d1]},
+        )
+        assert r.status_code == 422
+
+    async def test_missing_ids_reported(
+        self, async_client, auth_headers
+    ):
+        r = await async_client.post(
+            "/api/v1/defects/bulk-update",
+            headers=auth_headers,
+            json={
+                "ids": ["00000000-0000-0000-0000-000000000000"],
+                "severity": "Low",
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["data"]["succeeded"] == []
+        assert len(r.json()["data"]["failed"]) == 1

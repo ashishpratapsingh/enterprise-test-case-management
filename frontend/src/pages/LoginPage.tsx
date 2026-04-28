@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
@@ -12,9 +12,11 @@ import {
   InputAdornment,
   IconButton,
   Link,
+  Divider,
 } from '@mui/material';
-import { Visibility, VisibilityOff } from '@mui/icons-material';
+import { Visibility, VisibilityOff, Login as LoginIcon } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
+import authService from '../services/authService';
 import sabpaisaLogo from '../assets/sabpaisa-logo.svg';
 
 const LoginPage: React.FC = () => {
@@ -23,6 +25,21 @@ const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // SSO config — fetched once on mount. While we wait, the button
+  // simply isn't rendered. If the request fails we silently treat SSO
+  // as disabled (login form alone still works).
+  const [ssoConfig, setSsoConfig] = useState<{
+    enabled: boolean;
+    provider_name: string;
+  } | null>(null);
+
+  useEffect(() => {
+    authService.getSsoConfig().then(setSsoConfig).catch(() => setSsoConfig({
+      enabled: false,
+      provider_name: '',
+    }));
+  }, []);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -137,6 +154,29 @@ const LoginPage: React.FC = () => {
             >
               {loading ? <CircularProgress size={24} color="inherit" /> : 'Sign In'}
             </Button>
+
+            {ssoConfig?.enabled && (
+              <>
+                <Box display="flex" alignItems="center" gap={1} my={2}>
+                  <Divider sx={{ flexGrow: 1 }} />
+                  <Typography variant="caption" color="text.secondary">
+                    or
+                  </Typography>
+                  <Divider sx={{ flexGrow: 1 }} />
+                </Box>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  size="large"
+                  startIcon={<LoginIcon />}
+                  onClick={() => authService.beginSsoLogin(from)}
+                  sx={{ py: 1.5, fontSize: '0.95rem' }}
+                >
+                  Sign in with {ssoConfig.provider_name || 'SSO'}
+                </Button>
+              </>
+            )}
+
             <Box textAlign="center" mt={1}>
               <Link component={RouterLink} to="/forgot-password" variant="body2">
                 Forgot password?

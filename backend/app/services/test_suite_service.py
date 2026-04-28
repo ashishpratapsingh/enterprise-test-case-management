@@ -101,6 +101,39 @@ class TestSuiteService:
             raise NotFoundError(f"Test suite with id '{suite_id}' not found")
         return suite
 
+    # ── Bulk operations ─────────────────────────────────────────────────
+    #
+    # Same partial-success contract as the other bulk endpoints.
+
+    async def bulk_delete(self, suite_ids: list[Any]) -> dict[str, list]:
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for sid in suite_ids:
+            try:
+                await self.delete_suite(sid)
+                succeeded.append(str(sid))
+            except NotFoundError as e:
+                failed.append({"id": str(sid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_set_active(
+        self, suite_ids: list[Any], is_active: bool
+    ) -> dict[str, list]:
+        """Activate or deactivate many suites at once. Test-case
+        attachments and test runs are unaffected — only the
+        ``is_active`` flag flips."""
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for sid in suite_ids:
+            try:
+                updated = await self.suite_repo.update(sid, {"is_active": is_active})
+                if updated is None:
+                    raise NotFoundError(f"Test suite with id '{sid}' not found")
+                succeeded.append(str(sid))
+            except NotFoundError as e:
+                failed.append({"id": str(sid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
     async def add_test_case(
         self,
         suite_id: uuid.UUID,

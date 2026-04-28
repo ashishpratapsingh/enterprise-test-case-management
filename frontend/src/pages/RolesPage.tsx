@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   IconButton,
   TextField,
   Tooltip,
@@ -16,13 +18,16 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   LockOpen as LockOpenIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
+import { format } from 'date-fns';
 import { useSnackbar } from 'notistack';
 import DataTable, {
   GridColDef,
   GridPaginationModel,
 } from '../components/common/DataTable';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import ViewDialog from '../components/common/ViewDialog';
 import PermissionMatrix, { Permissions } from '../components/roles/PermissionMatrix';
 import roleService, {
   RoleCreatePayload,
@@ -61,6 +66,12 @@ const RolesPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Read-only detail dialog opened on row double-click. Holds the row
+  // directly — no extra fetch needed since the listing returns full
+  // permissions.
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewRole, setViewRole] = useState<Role | null>(null);
 
   const fetchRoles = useCallback(async () => {
     setLoading(true);
@@ -294,7 +305,14 @@ const RolesPage: React.FC = () => {
   return (
     <Box>
       {/* Heading + action bar layout matches the other list pages. */}
-      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Roles
       </Typography>
 
@@ -311,12 +329,23 @@ const RolesPage: React.FC = () => {
         )}
       </Box>
 
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open role details.
+      </Typography>
       <DataTable
         rows={roles}
         columns={columns}
         loading={loading}
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
+        onRowDoubleClick={({ row }) => {
+          setViewRole(row as Role);
+          setViewDialogOpen(true);
+        }}
       />
 
       {/* ── Create / Edit dialog ──────────────────────────────────────────── */}
@@ -376,6 +405,122 @@ const RolesPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* ── Role Detail (read-only) ───────────────────────────────────────── */}
+      <ViewDialog
+        open={viewDialogOpen}
+        onClose={() => setViewDialogOpen(false)}
+        fullScreen={isMobile}
+        title={
+          <>
+            <Typography variant="h6" fontWeight={700} component="span">
+              {viewRole?.name || 'Role'}
+            </Typography>
+            {viewRole && (() => {
+              const perms = (viewRole.permissions as Permissions) || {};
+              const resourceCount = Object.keys(perms).length;
+              const actionCount = Object.values(perms).reduce(
+                (sum, list) => sum + (list?.length || 0),
+                0,
+              );
+              return (
+                <Chip
+                  label={`${actionCount} permission${actionCount === 1 ? '' : 's'} · ${resourceCount} resource${resourceCount === 1 ? '' : 's'}`}
+                  size="small"
+                  sx={{ fontWeight: 600, bgcolor: 'action.selected' }}
+                />
+              );
+            })()}
+          </>
+        }
+        onEdit={
+          userIsAdmin && viewRole
+            ? () => {
+                setViewDialogOpen(false);
+                openEdit(viewRole);
+              }
+            : undefined
+        }
+      >
+        {viewRole && (
+          <Box>
+            <Box mb={2}>
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                color="text.secondary"
+                sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}
+              >
+                Description
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 0.3, whiteSpace: 'pre-wrap' }}>
+                {viewRole.description || '—'}
+              </Typography>
+            </Box>
+
+            {((viewRole as any).created_at || (viewRole as any).updated_at) && (
+              <Box mb={2} display="flex" gap={3} flexWrap="wrap">
+                {(viewRole as any).created_at && (
+                  <Box>
+                    <Typography
+                      variant="caption"
+                      fontWeight={700}
+                      color="text.secondary"
+                      sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}
+                    >
+                      Created
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 0.3 }}>
+                      {(() => {
+                        try {
+                          return format(new Date((viewRole as any).created_at), 'MMM dd, yyyy HH:mm');
+                        } catch {
+                          return '—';
+                        }
+                      })()}
+                    </Typography>
+                  </Box>
+                )}
+                {(viewRole as any).updated_at && (
+                  <Box>
+                    <Typography
+                      variant="caption"
+                      fontWeight={700}
+                      color="text.secondary"
+                      sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}
+                    >
+                      Last Updated
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 0.3 }}>
+                      {(() => {
+                        try {
+                          return format(new Date((viewRole as any).updated_at), 'MMM dd, yyyy HH:mm');
+                        } catch {
+                          return '—';
+                        }
+                      })()}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            )}
+
+            <Divider sx={{ my: 1.5 }} />
+            <Typography
+              variant="caption"
+              fontWeight={700}
+              color="text.secondary"
+              sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 1 }}
+            >
+              Permissions
+            </Typography>
+            <PermissionMatrix
+              value={(viewRole.permissions as Permissions) || {}}
+              onChange={() => { /* read-only */ }}
+              disabled
+            />
+          </Box>
+        )}
+      </ViewDialog>
       <ConfirmDialog
         open={!!confirmDeleteId}
         title="Delete role?"

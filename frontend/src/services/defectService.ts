@@ -104,6 +104,23 @@ export const defectService = {
     });
     return response.data.data;
   },
+
+  /**
+   * Plain-field bulk edit — severity and/or priority. Status and
+   * assignee have their own endpoints because they each carry domain
+   * rules (transition table, FK validation). Pass at least one field;
+   * undefined/null fields are skipped server-side.
+   */
+  async bulkUpdate(
+    ids: string[],
+    fields: { severity?: string; priority?: string },
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const payload: Record<string, any> = { ids };
+    if (fields.severity) payload.severity = fields.severity;
+    if (fields.priority) payload.priority = fields.priority;
+    const response = await api.post(`${PREFIX}/bulk-update`, payload);
+    return response.data.data;
+  },
 };
 
 export default defectService;

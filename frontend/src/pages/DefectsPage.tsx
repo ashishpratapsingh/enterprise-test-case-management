@@ -4,6 +4,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import useDefectAttachments from '../hooks/useDefectAttachments';
 import useIsMobile from '../hooks/useIsMobile';
 import {
+  Alert,
   Box,
   Button,
   Typography,
@@ -16,8 +17,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Menu as MuiMenu,
-  MenuItem as MuiMenuItem,
   Chip,
   Grid,
   Divider,
@@ -30,6 +29,8 @@ import {
   Radio,
   Tooltip,
   FormHelperText,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -43,6 +44,7 @@ import {
   Image as ImageIcon,
   Videocam,
   InsertDriveFile,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import { useSnackbar } from 'notistack';
@@ -53,6 +55,9 @@ import testCaseService from '../services/testCaseService';
 import epicService from '../services/epicService';
 import userStoryService from '../services/userStoryService';
 import userService from '../services/userService';
+import integrationService from '../services/integrationService';
+import useBulkEdit, { BulkFieldSpec } from '../hooks/useBulkEdit';
+import BulkEditDialog from '../components/common/BulkEditDialog';
 import { useAuth } from '../hooks/useAuth';
 import { canEdit } from '../utils/roleGuard';
 import { useProjects } from '../contexts/ProjectContext';
@@ -136,17 +141,29 @@ const DefectsPage: React.FC = () => {
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewDefect, setViewDefect] = useState<any>(null);
 
+  // JIRA browse URL prefix — fetched lazily once and cached so the
+  // "Open in JIRA" link can render on the view dialog. Empty when JIRA
+  // isn't configured server-side.
+  const [jiraBaseUrl, setJiraBaseUrl] = useState<string>('');
+
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Bulk operations — selected row IDs come from the DataTable's checkbox
-  // column. Bulk-action menus + delete confirm live alongside.
+  // column. The bulk-edit modal lets the user choose any combination of
+  // status / severity / priority / assignee changes in one apply step,
+  // matching the JIRA "Bulk Change" UX. Delete stays separate (destructive).
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
-  const [bulkStatusAnchor, setBulkStatusAnchor] = useState<HTMLElement | null>(null);
-  const [bulkAssignAnchor, setBulkAssignAnchor] = useState<HTMLElement | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Bulk-edit modal state. Field declarations live below users[] so
+  // they can populate the assignee options at render time.
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkResult, setBulkResult] = useState<null | {
+    perField: { field: string; succeeded: number; failed: number; firstError?: string }[];
+  }>(null);
 
   // Epics & User Stories for dropdowns
   const [allEpics, setAllEpics] = useState<{ id: string; title: string; project_id: string }[]>([]);
@@ -382,33 +399,106 @@ const DefectsPage: React.FC = () => {
     }
   };
 
-  const handleBulkTransition = async (newStatus: string) => {
-    if (selectedIds.length === 0) return;
-    setBulkStatusAnchor(null);
-    setBulkBusy(true);
-    try {
-      const result = await defectService.bulkTransitionStatus(selectedIds, newStatus);
-      reportBulkResult(`transitioned to '${newStatus}'`, result);
-      setSelectedIds([]);
-      fetchDefects();
-    } catch {
-      enqueueSnackbar('Bulk transition failed', { variant: 'error' });
-    } finally {
-      setBulkBusy(false);
-    }
+  // ── Bulk-update field spec ──────────────────────────────────────────────
+  // Drives BulkEditDialog. The hook handles state, per-field
+  // validation, and the "at least one ticked" / "all ticked have
+  // values" rules. Page just maps changedFields → backend calls
+  // below.
+  const bulkFields: BulkFieldSpec[] = [
+    {
+      key: 'status',
+      label: 'Change status',
+      type: 'select',
+      // Status select carries an aria-label so the existing
+      // DefectsPage test can locate it unambiguously.
+      inputAriaLabel: 'Bulk status selector',
+      options: STATUSES.map((s) => ({ value: s, label: s })),
+    },
+    {
+      key: 'severity',
+      label: 'Change severity',
+      type: 'select',
+      options: SEVERITIES.map((s) => ({ value: s, label: s })),
+    },
+    {
+      key: 'priority',
+      label: 'Change priority',
+      type: 'select',
+      options: PRIORITIES.map((p) => ({ value: p, label: p })),
+    },
+    {
+      key: 'assignedTo',
+      label: 'Change assignee',
+      type: 'select',
+      // Empty value = unassign — legitimate, so not required.
+      required: false,
+      options: [
+        { value: '', label: 'Unassigned' },
+        ...users.map((u) => ({ value: u.id, label: u.full_name || u.email })),
+      ],
+    },
+  ];
+  const bulkEdit = useBulkEdit(bulkFields);
+
+  const openBulkEdit = () => {
+    bulkEdit.reset();
+    setBulkResult(null);
+    setBulkEditOpen(true);
   };
 
-  const handleBulkAssign = async (userId: string | null) => {
+  // Run the chosen field changes sequentially against the bulk endpoints
+  // and aggregate per-field results so the dialog can show a structured
+  // summary (succeeded / failed counts per field), not just one snackbar.
+  const handleBulkApply = async () => {
     if (selectedIds.length === 0) return;
-    setBulkAssignAnchor(null);
+
+    type FieldResult = { field: string; succeeded: number; failed: number; firstError?: string };
+    const summarize = (
+      label: string,
+      r: { succeeded: string[]; failed: { id: string; error: string }[] },
+    ): FieldResult => ({
+      field: label,
+      succeeded: r.succeeded.length,
+      failed: r.failed.length,
+      firstError: r.failed[0]?.error,
+    });
+
+    const changes = bulkEdit.changedFields;
     setBulkBusy(true);
+    const perField: FieldResult[] = [];
     try {
-      const result = await defectService.bulkAssign(selectedIds, userId);
-      reportBulkResult(userId ? 'assigned' : 'unassigned', result);
+      if (changes.status) {
+        const r = await defectService.bulkTransitionStatus(selectedIds, changes.status);
+        perField.push(summarize(`Status → ${changes.status}`, r));
+      }
+      if ('assignedTo' in changes) {
+        const r = await defectService.bulkAssign(selectedIds, changes.assignedTo || null);
+        const target = changes.assignedTo
+          ? users.find((u) => u.id === changes.assignedTo)?.full_name ||
+            users.find((u) => u.id === changes.assignedTo)?.email ||
+            'user'
+          : 'Unassigned';
+        perField.push(summarize(`Assignee → ${target}`, r));
+      }
+      const sevPriPayload: { severity?: string; priority?: string } = {};
+      if (changes.severity) sevPriPayload.severity = changes.severity;
+      if (changes.priority) sevPriPayload.priority = changes.priority;
+      if (sevPriPayload.severity || sevPriPayload.priority) {
+        const r = await defectService.bulkUpdate(selectedIds, sevPriPayload);
+        const labels = [
+          sevPriPayload.severity ? `Severity → ${sevPriPayload.severity}` : '',
+          sevPriPayload.priority ? `Priority → ${sevPriPayload.priority}` : '',
+        ].filter(Boolean).join(' / ');
+        perField.push(summarize(labels, r));
+      }
+      setBulkResult({ perField });
+      // Wipe the selection: stale checkmarks on rows that were just
+      // mutated would mislead the user about which rows still need
+      // attention. The Done button on the dialog also closes it.
       setSelectedIds([]);
       fetchDefects();
     } catch {
-      enqueueSnackbar('Bulk assign failed', { variant: 'error' });
+      enqueueSnackbar('Bulk update failed', { variant: 'error' });
     } finally {
       setBulkBusy(false);
     }
@@ -419,6 +509,14 @@ const DefectsPage: React.FC = () => {
   const handleView = async (row: any) => {
     setViewDefect(row);
     setViewDialogOpen(true);
+    // Lazy-load JIRA config the first time someone views a JIRA-linked
+    // defect. integrationService caches across calls so this is cheap.
+    if (row?.jira_ticket_id && !jiraBaseUrl) {
+      integrationService
+        .getJiraConfig()
+        .then((cfg) => setJiraBaseUrl(cfg.base_url || ''))
+        .catch(() => {});
+    }
     if (row.id) {
       try {
         const atts = await defectService.getAttachments(row.id);
@@ -648,7 +746,14 @@ const DefectsPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: 'secondary.main', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Defects
       </Typography>
 
@@ -718,7 +823,10 @@ const DefectsPage: React.FC = () => {
         )}
       </Box>
 
-      {/* Bulk action bar — visible only when rows are selected */}
+      {/* Bulk action bar — visible only when rows are selected. JIRA-
+          style: a single primary "Bulk update" button opens a modal with
+          per-field change toggles. Delete stays inline as a destructive
+          action with its own confirm. */}
       {userCanEdit && selectedIds.length > 0 && (
         <Box
           role="toolbar"
@@ -740,19 +848,11 @@ const DefectsPage: React.FC = () => {
           </Typography>
           <Button
             size="small"
-            variant="outlined"
-            onClick={(e) => setBulkStatusAnchor(e.currentTarget)}
+            variant="contained"
+            onClick={openBulkEdit}
             disabled={bulkBusy}
           >
-            Change status
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={(e) => setBulkAssignAnchor(e.currentTarget)}
-            disabled={bulkBusy}
-          >
-            Assign…
+            Bulk update…
           </Button>
           <Button
             size="small"
@@ -774,35 +874,6 @@ const DefectsPage: React.FC = () => {
         </Box>
       )}
 
-      {/* Bulk: status menu */}
-      <MuiMenu
-        anchorEl={bulkStatusAnchor}
-        open={Boolean(bulkStatusAnchor)}
-        onClose={() => setBulkStatusAnchor(null)}
-      >
-        {STATUSES.map((s) => (
-          <MuiMenuItem key={s} onClick={() => handleBulkTransition(s)}>
-            {s}
-          </MuiMenuItem>
-        ))}
-      </MuiMenu>
-
-      {/* Bulk: assignee menu */}
-      <MuiMenu
-        anchorEl={bulkAssignAnchor}
-        open={Boolean(bulkAssignAnchor)}
-        onClose={() => setBulkAssignAnchor(null)}
-      >
-        <MuiMenuItem onClick={() => handleBulkAssign(null)}>
-          <em>Unassigned</em>
-        </MuiMenuItem>
-        {users.map((u) => (
-          <MuiMenuItem key={u.id} onClick={() => handleBulkAssign(u.id)}>
-            {u.full_name || u.email}
-          </MuiMenuItem>
-        ))}
-      </MuiMenu>
-
       <ConfirmDialog
         open={bulkDeleteConfirm}
         title={`Delete ${selectedIds.length} defect(s)?`}
@@ -813,6 +884,25 @@ const DefectsPage: React.FC = () => {
         onConfirm={handleBulkDelete}
       />
 
+      <BulkEditDialog
+        open={bulkEditOpen}
+        onClose={() => setBulkEditOpen(false)}
+        entityLabel="defect"
+        selectionCount={selectedIds.length}
+        fields={bulkFields}
+        bulk={bulkEdit}
+        busy={bulkBusy}
+        onApply={handleBulkApply}
+        result={bulkResult}
+      />
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open defect details.
+      </Typography>
       {/* Data Table */}
       <DataTable
         rows={defects}
@@ -821,7 +911,7 @@ const DefectsPage: React.FC = () => {
         loading={loading}
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
-        onRowClick={(params) => handleView(params)}
+        onRowDoubleClick={({ row }) => handleView(row)}
         getRowId={(row) => row.id}
         checkboxSelection={userCanEdit}
         rowSelectionModel={selectedIds}
@@ -1328,7 +1418,35 @@ const DefectsPage: React.FC = () => {
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <DetailRow label="Jira Ticket" value={viewDefect.jira_ticket_id} />
+                <DetailRow
+                  label="Jira Ticket"
+                  value={
+                    viewDefect.jira_ticket_id ? (
+                      jiraBaseUrl ? (
+                        <Box
+                          component="a"
+                          href={integrationService.buildJiraBrowseUrl(jiraBaseUrl, viewDefect.jira_ticket_id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{
+                            color: 'primary.main',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                          aria-label={`Open ${viewDefect.jira_ticket_id} in JIRA`}
+                        >
+                          {viewDefect.jira_ticket_id}
+                          <OpenInNewIcon fontSize="inherit" />
+                        </Box>
+                      ) : (
+                        viewDefect.jira_ticket_id
+                      )
+                    ) : null
+                  }
+                />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <DetailRow label="Assignee" value={viewDefect.assigned_to_name} />

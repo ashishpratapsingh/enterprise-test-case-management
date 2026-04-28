@@ -123,6 +123,51 @@ export const testCaseService = {
     });
     return response.data;
   },
+
+  // ── Bulk operations (JIRA-style multi-select edit) ──────────────────
+  async bulkDelete(
+    ids: string[],
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-delete`, { ids });
+    return response.data.data;
+  },
+
+  /** Run the approval workflow (Draft → Ready → Approved) on many test
+   * cases. Invalid transitions land in `failed` per id. */
+  async bulkTransitionApproval(
+    ids: string[],
+    status: string,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-transition`, { ids, status });
+    return response.data.data;
+  },
+
+  /** Plain-field bulk edit. Pass at least one of priority / type /
+   * automation_status / assigned_to / unassign. ``unassign: true``
+   * forces assignee → null (since we can't tell "leave unchanged"
+   * from "set null" with just `assigned_to`). */
+  async bulkUpdate(
+    ids: string[],
+    fields: {
+      priority?: string;
+      type?: string;
+      automation_status?: string;
+      assigned_to?: string;
+      unassign?: boolean;
+    },
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const payload: Record<string, any> = { ids };
+    if (fields.priority) payload.priority = fields.priority;
+    if (fields.type) payload.type = fields.type;
+    if (fields.automation_status) payload.automation_status = fields.automation_status;
+    if (fields.unassign) {
+      payload.unassign = true;
+    } else if (fields.assigned_to) {
+      payload.assigned_to = fields.assigned_to;
+    }
+    const response = await api.post(`${PREFIX}/bulk-update`, payload);
+    return response.data.data;
+  },
 };
 
 export default testCaseService;

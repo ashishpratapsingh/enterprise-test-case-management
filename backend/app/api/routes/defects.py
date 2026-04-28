@@ -24,6 +24,14 @@ class _BulkTransition(_BulkIds):
 class _BulkAssign(_BulkIds):
     assigned_to: str | None = Field(default=None, description="Target user ID, or null to unassign")
 
+
+class _BulkUpdate(_BulkIds):
+    """Plain-field bulk edit — severity and/or priority. Each is optional;
+    omit the field entirely (or send null) to leave it unchanged across
+    the selected defects."""
+    severity: str | None = Field(default=None, max_length=30)
+    priority: str | None = Field(default=None, max_length=30)
+
 UPLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
     "uploads",
@@ -198,6 +206,32 @@ async def bulk_assign_defects(
 ) -> dict:
     service = DefectService(db)
     result = await service.bulk_assign(payload.ids, payload.assigned_to)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} defect(s) updated",
+    )
+
+
+@router.post(
+    "/bulk-update",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-update simple fields (severity, priority) on multiple defects",
+)
+async def bulk_update_defects(
+    payload: _BulkUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    if payload.severity is None and payload.priority is None:
+        from app.core.exceptions import ValidationError
+        raise ValidationError("At least one of severity / priority must be provided")
+    service = DefectService(db)
+    result = await service.bulk_update(
+        payload.ids,
+        severity=payload.severity,
+        priority=payload.priority,
+    )
     return success_response(
         data=result,
         message=f"{len(result['succeeded'])} defect(s) updated",
