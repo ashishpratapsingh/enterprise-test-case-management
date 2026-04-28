@@ -79,6 +79,48 @@ export const defectService = {
   async deleteAttachment(defectId: string, attachmentId: string): Promise<void> {
     await api.delete(`${PREFIX}/${defectId}/attachments/${attachmentId}`);
   },
+
+  // ── Bulk operations ─────────────────────────────────────────────────
+  async bulkDelete(ids: string[]): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-delete`, { ids });
+    return response.data.data;
+  },
+
+  async bulkTransitionStatus(
+    ids: string[],
+    status: string,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-transition`, { ids, status });
+    return response.data.data;
+  },
+
+  async bulkAssign(
+    ids: string[],
+    assignedTo: string | null,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-assign`, {
+      ids,
+      assigned_to: assignedTo,
+    });
+    return response.data.data;
+  },
+
+  /**
+   * Plain-field bulk edit — severity and/or priority. Status and
+   * assignee have their own endpoints because they each carry domain
+   * rules (transition table, FK validation). Pass at least one field;
+   * undefined/null fields are skipped server-side.
+   */
+  async bulkUpdate(
+    ids: string[],
+    fields: { severity?: string; priority?: string },
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const payload: Record<string, any> = { ids };
+    if (fields.severity) payload.severity = fields.severity;
+    if (fields.priority) payload.priority = fields.priority;
+    const response = await api.post(`${PREFIX}/bulk-update`, payload);
+    return response.data.data;
+  },
 };
 
 export default defectService;

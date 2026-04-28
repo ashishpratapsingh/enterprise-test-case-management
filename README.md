@@ -122,7 +122,7 @@ Frontend is live at http://localhost:3000.
 
 Use the seed credentials:
 
-- **Email:** `admin@tcm.com`
+- **Email:** `ashish.pratap@sabpaisa.in`
 - **Password:** `Admin@123`
 
 Change the password immediately in any environment that isn't your laptop.
@@ -225,6 +225,150 @@ Summary of the ones most people change:
 The API response is the same generic message in either case — we never
 leak whether the email was registered, and we never echo the token
 back over HTTP.
+
+---
+
+## Single sign-on (OpenID Connect)
+
+The backend ships a generic OIDC client that works with any standards-
+compliant IdP — Okta, Azure AD, Google, Keycloak, Auth0, etc. When SSO
+is configured, a **"Sign in with {provider}"** button appears on the
+login page. Clicking it bounces the user through the IdP and back into
+the app with our own JWT pair already stored.
+
+### Configuration
+
+Set these in `.env` (defaults disable SSO):
+
+| Variable | Notes |
+|---|---|
+| `OIDC_DISCOVERY_URL` | The IdP's well-known config. Endpoints auto-discovered. |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | App credentials registered with the IdP. |
+| `OIDC_SCOPES` | Default `openid email profile` — must include `email`. |
+| `OIDC_REDIRECT_URI` | Must be whitelisted in the IdP. Leave blank to derive from `APP_BASE_URL`. |
+| `OIDC_PROVIDER_NAME` | Label on the login button. Default `SSO`. |
+| `OIDC_DEFAULT_ROLE_NAME` | Role name assigned to **auto-provisioned** users. Set to `""` to require admin pre-provisioning. |
+
+### Provider-specific discovery URLs
+
+```
+Google     https://accounts.google.com/.well-known/openid-configuration
+Okta       https://{your-org}.okta.com/.well-known/openid-configuration
+Azure AD   https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration
+Keycloak   https://{kc-host}/realms/{realm}/.well-known/openid-configuration
+```
+
+### Flow
+
+1. User clicks **"Sign in with {provider}"** on `/login`.
+2. Browser redirects through `GET /api/v1/auth/sso/login`, which
+   generates a signed CSRF state JWT and bounces to the IdP.
+3. IdP authenticates, redirects back to
+   `GET /api/v1/auth/sso/callback?code=…&state=…`.
+4. Backend verifies state, exchanges the code for tokens, hits the
+   userinfo endpoint, and either matches an existing user by email or
+   auto-creates one with `OIDC_DEFAULT_ROLE_NAME`.
+5. Tokens land in the URL fragment (`#access_token=…`) on the
+   frontend's `/sso/callback` route — kept out of server logs and
+   Referer headers — and the user is dropped on their original
+   destination.
+
+### Security notes
+
+- The state parameter is a JWT signed with `SECRET_KEY`, valid for 5
+  minutes — this is the CSRF guard. Don't share `SECRET_KEY` between
+  environments.
+- Auto-provisioned users have a random unguessable password hash;
+  they can't sign in via the password form unless they go through
+  forgot-password. Disable auto-provisioning (`OIDC_DEFAULT_ROLE_NAME=""`)
+  in environments where every account must be manually approved.
+- ID-token signature verification against JWKS is **not** performed in
+  V1. We only trust identity from the userinfo endpoint, which already
+  requires a valid IdP-issued access token. JWKS verification can be
+  added if your threat model needs it.
+
+---
+
+## Error reporting (Sentry)
+
+The backend has the Sentry SDK wired but **dormant**: it does nothing
+until you set `SENTRY_DSN` in `.env`. With a DSN configured, both
+errors and performance traces stream to your Sentry project; FastAPI,
+SQLAlchemy, and httpx are auto-instrumented by the bundled
+integrations.
+
+```
+SENTRY_DSN=https://your-key@sentry.example.com/1
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0.1   # 0.0 = errors only; 1.0 = every request
+SENTRY_RELEASE=$GIT_SHA          # typically injected by CI
+```
+
+`send_default_pii` is **off** by default — events don't carry user
+identifiers unless you opt in.
+
+---
+
+## CI integration (record build results)
+
+The backend exposes a webhook your CI pipeline can call once a build's
+tests finish:
+
+```
+POST /api/v1/integrations/ci/results
+Authorization: Bearer <service-account JWT>
+Content-Type: application/json
+
+{
+  "project_id":     "<project UUID>",
+  "test_suite_id":  "<suite UUID — must belong to project_id>",
+  "run_name":       "Build #1234",
+  "environment":    "Chrome 120 / staging",
+  "started_at":     "2026-04-28T10:00:00Z",   // optional, defaults to now
+  "completed_at":   "2026-04-28T10:05:23Z",   // optional, defaults to now
+  "results": [
+    {
+      "test_case_id":     "TC-PROJ-0001",     // human-readable ID
+      "status":           "passed",            // pass / fail / skipped / blocked
+      "duration_seconds": 1.4,                 // optional
+      "error_message":    "AssertionError: …"  // optional, recorded on failures
+    }
+  ]
+}
+```
+
+The endpoint creates a `TestRun` directly in `Completed` state and
+links one `TestExecution` per matched test case. Status values are
+case-insensitive; aliases like `pass`/`success` and `fail`/`failure`
+both work.
+
+**Partial-success contract**: unknown `test_case_id`s and unrecognised
+statuses land in the response's `failed[]` array — the rest of the
+batch still records. Sample success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "test_run_id":   "abc-123-...",
+    "test_run_name": "Build #1234",
+    "status":        "Completed",
+    "succeeded":     ["TC-PROJ-0001", "TC-PROJ-0002"],
+    "failed":        [{ "test_case_id": "TC-GHOST", "error": "Test case 'TC-GHOST' not found in project" }]
+  }
+}
+```
+
+**Authentication**: standard JWT. Create a service-account user with
+an editor role (Admin / QA Head / QA Engineer), grab the access token,
+and stash it in your CI's secret manager. There's no separate API-key
+system today.
+
+**Setup checklist**:
+1. Pick / create a `TestSuite` for your CI runs in the UI. Note its UUID.
+2. Make sure every test in your CI suite has a matching test case
+   whose `test_case_id` (e.g. `TC-PROJ-0001`) is what your CI emits.
+3. Configure CI to POST results to the endpoint after every build.
 
 ---
 

@@ -1,6 +1,7 @@
 """Test suite management routes."""
 
 from fastapi import APIRouter, Body, Depends, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
@@ -8,6 +9,17 @@ from app.services.test_suite_service import TestSuiteService
 from app.utils.helpers import build_filters
 
 router = APIRouter(prefix="/testsuites", tags=["Test Suites"])
+
+
+# ── Bulk operation schemas ─────────────────────────────────────────────────
+
+
+class _BulkIds(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500, description="Test suite IDs")
+
+
+class _BulkSetActive(_BulkIds):
+    is_active: bool = Field(description="True to activate, false to deactivate")
 
 
 @router.get(
@@ -148,3 +160,45 @@ async def remove_test_case_from_suite(
     service = TestSuiteService(db)
     await service.remove_test_case(suite_id=suite_id, test_case_id=case_id)
     return success_response(message="Test case removed from suite successfully")
+
+
+# ── Bulk operations ────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/bulk-delete",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete multiple test suites",
+)
+async def bulk_delete_test_suites(
+    payload: _BulkIds = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = TestSuiteService(db)
+    result = await service.bulk_delete(payload.ids)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} suite(s) deleted",
+    )
+
+
+@router.post(
+    "/bulk-set-active",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Activate or deactivate multiple test suites",
+)
+async def bulk_set_active_test_suites(
+    payload: _BulkSetActive = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = TestSuiteService(db)
+    result = await service.bulk_set_active(payload.ids, payload.is_active)
+    label = "activated" if payload.is_active else "deactivated"
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} suite(s) {label}",
+    )

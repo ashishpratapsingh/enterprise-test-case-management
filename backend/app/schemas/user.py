@@ -102,3 +102,22 @@ class RoleResponse(BaseModel):
     name: str
     description: str | None = None
     permissions: dict | None = None
+
+
+class RoleCreate(BaseModel):
+    """Schema for creating a role."""
+
+    name: str = Field(min_length=1, max_length=50, description="Display name")
+    description: str | None = Field(default=None, max_length=500)
+    permissions: dict | None = Field(
+        default=None,
+        description="Resource → list-of-actions map, e.g. {'users': ['read']}",
+    )
+
+
+class RoleUpdate(BaseModel):
+    """Schema for updating a role (all fields optional)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: dict | None = None

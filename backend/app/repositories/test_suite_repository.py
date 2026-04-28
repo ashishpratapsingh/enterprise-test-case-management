@@ -3,10 +3,12 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.repositories.base import BaseRepository
+from app.utils.db_search import build_search_filter
 
 
 def _safe_user(user: Any) -> dict | None:
@@ -58,10 +60,51 @@ class TestSuiteRepository(BaseRepository):
         }
 
     async def get_all(self, **kwargs) -> tuple[list, int]:
-        """Override to eagerly load test_suite_cases, excluding deleted test cases."""
+        """Override to eagerly load test_suite_cases (excluding deleted
+        test cases) and to honour the ``search`` free-text filter, which
+        the base equality matcher would silently drop.
+        """
         from app.models.test_case import TestCase
 
-        items, total = await super().get_all(**kwargs)
+        filters: dict[str, Any] = dict(kwargs.pop("filters", None) or {})
+        search = filters.pop("search", None)
+
+        if not search:
+            kwargs["filters"] = filters or None
+            items, total = await super().get_all(**kwargs)
+        else:
+            page = kwargs.get("page", 1)
+            page_size = kwargs.get("page_size", 20)
+            sort_by = kwargs.get("sort_by", "created_at")
+            sort_order = kwargs.get("sort_order", "desc")
+            include_deleted = kwargs.get("include_deleted", False)
+
+            stmt = self._base_query(include_deleted=include_deleted)
+            for field_name, value in filters.items():
+                column = getattr(self.model, field_name, None)
+                if column is not None and value is not None:
+                    stmt = stmt.where(column == value)
+
+            search_clause = build_search_filter(
+                self.model,
+                search,
+                ["name", "description"],
+                self.session.get_bind(),
+            )
+            if search_clause is not None:
+                stmt = stmt.where(search_clause)
+
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            total = (await self.session.execute(count_stmt)).scalar_one()
+
+            sort_col = getattr(self.model, sort_by, None)
+            if sort_col is not None:
+                stmt = stmt.order_by(
+                    sort_col.asc() if sort_order == "asc" else sort_col.desc()
+                )
+            stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+            items = list((await self.session.execute(stmt)).scalars().all())
+
         for item in items:
             await self.session.refresh(item, ["test_suite_cases", "creator"])
             # Filter out associations pointing to soft-deleted test cases
@@ -80,13 +123,20 @@ class TestSuiteRepository(BaseRepository):
         return list(result.scalars().all())
 
     async def get_with_cases(self, suite_id: uuid.UUID):
-        """Get a test suite with its test_suite_cases and nested test_case eagerly loaded."""
+        """Get a test suite with its test_suite_cases, nested test_case,
+        and the creator User eagerly loaded.
+
+        ``creator`` is needed so the GET-by-id response carries the same
+        ``Created By`` information that the list endpoint already exposes
+        — otherwise the detail dialog renders a blank field.
+        """
         from app.models.test_suite_case import TestSuiteCase
 
         stmt = (
             self._base_query()
             .options(
-                joinedload(self.model.test_suite_cases).joinedload(TestSuiteCase.test_case)
+                joinedload(self.model.test_suite_cases).joinedload(TestSuiteCase.test_case),
+                joinedload(self.model.creator),
             )
             .where(self.model.id == suite_id)
         )

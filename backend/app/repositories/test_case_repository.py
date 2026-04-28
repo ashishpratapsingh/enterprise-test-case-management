@@ -7,6 +7,7 @@ from sqlalchemy import String, cast, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.base import BaseRepository
+from app.utils.db_search import build_search_filter
 
 
 def _safe_user(user: Any) -> dict | None:
@@ -79,8 +80,57 @@ class TestCaseRepository(BaseRepository):
         return self._serialize(item)
 
     async def get_all(self, **kwargs) -> tuple[list, int]:
-        """Override to enrich test cases with project/epic/user_story info."""
-        items, total = await super().get_all(**kwargs)
+        """Override to enrich test cases with project / epic / user_story
+        info AND honour the ``search`` free-text filter.
+
+        Search runs across ``title`` and ``description`` via
+        ``build_search_filter`` (Postgres FTS / SQLite LIKE fallback).
+        Without this override, ``search`` would silently fall through
+        the base equality matcher and never apply.
+        """
+        filters: dict[str, Any] = dict(kwargs.pop("filters", None) or {})
+        search = filters.pop("search", None)
+
+        if not search:
+            kwargs["filters"] = filters or None
+            items, total = await super().get_all(**kwargs)
+        else:
+            page = kwargs.get("page", 1)
+            page_size = kwargs.get("page_size", 20)
+            sort_by = kwargs.get("sort_by", "created_at")
+            sort_order = kwargs.get("sort_order", "desc")
+            include_deleted = kwargs.get("include_deleted", False)
+
+            stmt = self._base_query(include_deleted=include_deleted)
+            for field_name, value in filters.items():
+                column = getattr(self.model, field_name, None)
+                if column is not None and value is not None:
+                    if isinstance(value, list):
+                        stmt = stmt.where(column.in_(value))
+                    else:
+                        stmt = stmt.where(column == value)
+
+            bind = self.session.get_bind()
+            search_clause = build_search_filter(
+                self.model,
+                search,
+                ["title", "description"],
+                bind,
+            )
+            if search_clause is not None:
+                stmt = stmt.where(search_clause)
+
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            total = (await self.session.execute(count_stmt)).scalar_one()
+
+            sort_col = getattr(self.model, sort_by, None)
+            if sort_col is not None:
+                stmt = stmt.order_by(
+                    sort_col.asc() if sort_order == "asc" else sort_col.desc()
+                )
+            stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+            items = list((await self.session.execute(stmt)).scalars().all())
+
         results = []
         for item in items:
             await self.session.refresh(item, ["project", "epic", "user_story", "creator", "assignee"])

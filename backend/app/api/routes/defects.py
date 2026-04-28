@@ -3,13 +3,34 @@
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
 from app.services.attachment_service import AttachmentService
 from app.services.defect_service import DefectService
 from app.utils.helpers import build_filters
+
+
+class _BulkIds(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500, description="Defect IDs")
+
+
+class _BulkTransition(_BulkIds):
+    status: str = Field(min_length=1, max_length=30)
+
+
+class _BulkAssign(_BulkIds):
+    assigned_to: str | None = Field(default=None, description="Target user ID, or null to unassign")
+
+
+class _BulkUpdate(_BulkIds):
+    """Plain-field bulk edit — severity and/or priority. Each is optional;
+    omit the field entirely (or send null) to leave it unchanged across
+    the selected defects."""
+    severity: str | None = Field(default=None, max_length=30)
+    priority: str | None = Field(default=None, max_length=30)
 
 UPLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
@@ -126,6 +147,95 @@ async def delete_defect(
     service = DefectService(db)
     await service.delete_defect(defect_id=defect_id)
     return success_response(message="Defect deleted successfully")
+
+
+# ── Bulk operations ────────────────────────────────────────────────────────
+#
+# Each bulk endpoint accepts up to 500 IDs and returns a structured
+# {succeeded, failed} report. Per-id failures are non-fatal — the route
+# always returns 200 with the partial result so the UI can show progress.
+
+@router.post(
+    "/bulk-delete",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete multiple defects",
+)
+async def bulk_delete_defects(
+    payload: _BulkIds = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = DefectService(db)
+    result = await service.bulk_delete(payload.ids)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} defect(s) deleted",
+    )
+
+
+@router.post(
+    "/bulk-transition",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Transition multiple defects to a new status",
+)
+async def bulk_transition_defects(
+    payload: _BulkTransition = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = DefectService(db)
+    result = await service.bulk_transition_status(payload.ids, payload.status)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} defect(s) transitioned to '{payload.status}'",
+    )
+
+
+@router.post(
+    "/bulk-assign",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Assign multiple defects to a user",
+)
+async def bulk_assign_defects(
+    payload: _BulkAssign = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    service = DefectService(db)
+    result = await service.bulk_assign(payload.ids, payload.assigned_to)
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} defect(s) updated",
+    )
+
+
+@router.post(
+    "/bulk-update",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-update simple fields (severity, priority) on multiple defects",
+)
+async def bulk_update_defects(
+    payload: _BulkUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    if payload.severity is None and payload.priority is None:
+        from app.core.exceptions import ValidationError
+        raise ValidationError("At least one of severity / priority must be provided")
+    service = DefectService(db)
+    result = await service.bulk_update(
+        payload.ids,
+        severity=payload.severity,
+        priority=payload.priority,
+    )
+    return success_response(
+        data=result,
+        message=f"{len(result['succeeded'])} defect(s) updated",
+    )
 
 
 @router.post(

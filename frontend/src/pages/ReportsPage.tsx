@@ -192,7 +192,13 @@ const ReportsPage: React.FC = () => {
     <Box>
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e' }}>
+        <Typography
+          variant="h4"
+          fontWeight={600}
+          sx={(theme) => ({
+            color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          })}
+        >
           Reports
         </Typography>
       </Box>
@@ -299,7 +305,7 @@ const ReportsPage: React.FC = () => {
                   {c.icon}
                 </Box>
                 <Box flexGrow={1}>
-                  <Typography variant="h6" fontWeight={700} sx={{ color: '#1a237e', lineHeight: 1.2 }}>
+                  <Typography variant="h6" fontWeight={700} sx={{ color: 'secondary.main', lineHeight: 1.2 }}>
                     {c.title}
                   </Typography>
                   {c.scopeChip && (

@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import useIsMobile from '../hooks/useIsMobile';
 import {
+  Alert,
   Box,
   Button,
   Typography,
@@ -20,6 +22,8 @@ import {
   Switch,
   FormControlLabel,
   FormHelperText,
+  Checkbox,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -29,6 +33,7 @@ import {
   Clear as ClearIcon,
   Upload as UploadIcon,
   Download as DownloadIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 import { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import { useSnackbar } from 'notistack';
@@ -38,6 +43,8 @@ import testCaseService from '../services/testCaseService';
 import epicService from '../services/epicService';
 import userStoryService from '../services/userStoryService';
 import userService from '../services/userService';
+import useBulkEdit, { BulkFieldSpec } from '../hooks/useBulkEdit';
+import BulkEditDialog from '../components/common/BulkEditDialog';
 import { TestCase, TestStep, Project, TestCaseType, TestCasePriority, TestCaseStatus } from '../types';
 import { useAuth } from '../hooks/useAuth';
 import { canEdit, canApprove } from '../utils/roleGuard';
@@ -48,6 +55,12 @@ const TYPES: TestCaseType[] = ['functional', 'regression', 'smoke', 'integration
 const PRIORITIES: TestCasePriority[] = ['low', 'medium', 'high', 'critical'];
 const STATUSES: TestCaseStatus[] = ['passed', 'failed', 'blocked', 'in_progress', 'skipped', 'draft'];
 const EDITABLE_STATUSES: string[] = ['draft', 'blocked', 'in_progress', 'skipped', 'ready_for_review', 'in_progress_review', 'ready_to_test'];
+// Approval workflow values offered by the bulk-edit dialog. Backend's
+// ``_APPROVAL_TRANSITIONS`` enforces Draft → Ready → Approved (with
+// allowed reverse moves); illegal transitions land in ``failed`` per id.
+const APPROVAL_STATUSES: string[] = ['Draft', 'Ready', 'Approved'];
+const AUTOMATION_OPTIONS: string[] = ['Manual', 'Automated'];
+const BULK_MAX = 500;
 
 const TestCasesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -55,6 +68,7 @@ const TestCasesPage: React.FC = () => {
   const { user } = useAuth();
   const userCanEdit = user ? canEdit(user.role) : false;
   const userCanApprove = user ? canApprove(user.role) : false;
+  const isMobile = useIsMobile();
 
   const { projects } = useProjects();
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -73,6 +87,18 @@ const TestCasesPage: React.FC = () => {
   const [filterPriority, setFilterPriority] = useState<string>('');
   const [filterAutomated, setFilterAutomated] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Bulk operations (JIRA-style) ───────────────────────────────────────
+  // Same shape as DefectsPage: single dialog with per-field "change?"
+  // checkboxes, partial-success result panel, and an inline destructive
+  // Delete button outside the dialog.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkResult, setBulkResult] = useState<null | {
+    perField: { field: string; succeeded: number; failed: number; firstError?: string }[];
+  }>(null);
 
   // Users for assignee dropdown
   const [users, setUsers] = useState<{ id: string; full_name: string; email: string }[]>([]);
@@ -304,6 +330,159 @@ const TestCasesPage: React.FC = () => {
     }
   };
 
+  // ── Bulk handlers ───────────────────────────────────────────────────────
+
+  const reportBulkResult = (
+    label: string,
+    result: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (result.succeeded.length > 0) {
+      enqueueSnackbar(`${result.succeeded.length} test case(s) ${label}`, { variant: 'success' });
+    }
+    if (result.failed.length > 0) {
+      enqueueSnackbar(
+        `${result.failed.length} test case(s) skipped: ${result.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const r = await testCaseService.bulkDelete(selectedIds);
+      reportBulkResult('deleted', r);
+      setSelectedIds([]);
+      setBulkDeleteConfirm(false);
+      fetchTestCases();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // ── Bulk-update field spec ──────────────────────────────────────────────
+  // Status uses the approval workflow; everything else is a plain
+  // bulkUpdate. The dialog component handles all the validation /
+  // error / Apply gating; we just translate ``bulk.changedFields``
+  // into the right endpoints below.
+  const bulkFields: BulkFieldSpec[] = [
+    {
+      key: 'status',
+      label: 'Change status',
+      type: 'select',
+      options: APPROVAL_STATUSES.map((s) => ({ value: s, label: s })),
+      helperText:
+        'Approval workflow: Draft → Ready → Approved (and the legal reverse moves). Illegal transitions are skipped per row.',
+    },
+    {
+      key: 'priority',
+      label: 'Change priority',
+      type: 'select',
+      options: PRIORITIES.map((p) => ({
+        value: p,
+        label: p.charAt(0).toUpperCase() + p.slice(1),
+      })),
+    },
+    {
+      key: 'type',
+      label: 'Change type',
+      type: 'select',
+      options: TYPES.map((t) => ({
+        value: t,
+        label: t.charAt(0).toUpperCase() + t.slice(1),
+      })),
+    },
+    {
+      key: 'automation',
+      label: 'Change automation',
+      type: 'select',
+      options: AUTOMATION_OPTIONS.map((a) => ({ value: a, label: a })),
+    },
+    {
+      key: 'assignedTo',
+      label: 'Change assignee',
+      type: 'select',
+      required: false,
+      options: [
+        { value: '', label: 'Unassigned' },
+        ...users.map((u) => ({ value: u.id, label: u.full_name || u.email })),
+      ],
+    },
+  ];
+  const bulkEdit = useBulkEdit(bulkFields);
+
+  const openBulkEdit = () => {
+    bulkEdit.reset();
+    setBulkResult(null);
+    setBulkEditOpen(true);
+  };
+
+  // Translate ``bulk.changedFields`` into the relevant backend calls.
+  // Status flows through bulkTransitionApproval (workflow rules);
+  // everything else is bulkUpdate.
+  const handleBulkApply = async () => {
+    if (selectedIds.length === 0) return;
+    type FieldResult = { field: string; succeeded: number; failed: number; firstError?: string };
+    const summarize = (
+      label: string,
+      r: { succeeded: string[]; failed: { id: string; error: string }[] },
+    ): FieldResult => ({
+      field: label,
+      succeeded: r.succeeded.length,
+      failed: r.failed.length,
+      firstError: r.failed[0]?.error,
+    });
+
+    const changes = bulkEdit.changedFields;
+    setBulkBusy(true);
+    const perField: FieldResult[] = [];
+    try {
+      if (changes.status) {
+        const r = await testCaseService.bulkTransitionApproval(selectedIds, changes.status);
+        perField.push(summarize(`Status → ${changes.status}`, r));
+      }
+      if ('assignedTo' in changes) {
+        const target = changes.assignedTo
+          ? users.find((u) => u.id === changes.assignedTo)?.full_name ||
+            users.find((u) => u.id === changes.assignedTo)?.email ||
+            'user'
+          : 'Unassigned';
+        const r = await testCaseService.bulkUpdate(
+          selectedIds,
+          changes.assignedTo
+            ? { assigned_to: changes.assignedTo }
+            : { unassign: true },
+        );
+        perField.push(summarize(`Assignee → ${target}`, r));
+      }
+      const updatePayload: {
+        priority?: string; type?: string; automation_status?: string;
+      } = {};
+      if (changes.priority) updatePayload.priority = changes.priority;
+      if (changes.type) updatePayload.type = changes.type;
+      if (changes.automation) updatePayload.automation_status = changes.automation;
+      if (Object.keys(updatePayload).length > 0) {
+        const r = await testCaseService.bulkUpdate(selectedIds, updatePayload);
+        const labels = [
+          updatePayload.priority ? `Priority → ${updatePayload.priority}` : '',
+          updatePayload.type ? `Type → ${updatePayload.type}` : '',
+          updatePayload.automation_status ? `Automation → ${updatePayload.automation_status}` : '',
+        ].filter(Boolean).join(' / ');
+        perField.push(summarize(labels, r));
+      }
+      setBulkResult({ perField });
+      setSelectedIds([]);
+      fetchTestCases();
+    } catch {
+      enqueueSnackbar('Bulk update failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const handleApprove = async (id: number) => {
     try {
       await testCaseService.approve(id);
@@ -417,7 +596,7 @@ const TestCasesPage: React.FC = () => {
       blocked:     { bg: 'rgba(245, 158, 11, 0.1)',  color: '#d97706', border: 'rgba(245, 158, 11, 0.3)' },
       in_progress: { bg: 'rgba(59, 130, 246, 0.1)',  color: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)' },
       skipped:     { bg: 'rgba(107, 114, 128, 0.1)', color: '#6b7280', border: 'rgba(107, 114, 128, 0.3)' },
-      draft:       { bg: 'rgba(26, 35, 126, 0.08)',  color: '#1a237e', border: 'rgba(26, 35, 126, 0.2)' },
+      draft:       { bg: 'rgba(26, 35, 126, 0.08)',  color: 'secondary.main', border: 'rgba(26, 35, 126, 0.2)' },
       review:      { bg: 'rgba(245, 124, 0, 0.1)',  color: '#f57c00', border: 'rgba(245, 124, 0, 0.3)' },
       deprecated:  { bg: 'rgba(107, 114, 128, 0.08)',color: '#9ca3af', border: 'rgba(107, 114, 128, 0.2)' },
     };
@@ -596,7 +775,14 @@ const TestCasesPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Test Cases
       </Typography>
 
@@ -731,6 +917,64 @@ const TestCasesPage: React.FC = () => {
         )}
       </Box>
 
+      {/* Bulk action bar — visible only when rows are selected. Same
+          JIRA-style two-button layout as DefectsPage: a primary "Bulk
+          update" opens the multi-field modal; "Delete" is destructive
+          with its own confirm. */}
+      {userCanEdit && selectedIds.length > 0 && (
+        <Box
+          role="toolbar"
+          aria-label="Bulk actions"
+          mb={1.5}
+          px={2}
+          py={1}
+          display="flex"
+          alignItems="center"
+          gap={1.5}
+          sx={{
+            borderRadius: 2,
+            backgroundColor: 'rgba(245, 124, 0, 0.08)',
+            border: '1px solid rgba(245, 124, 0, 0.3)',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedIds.length} selected
+          </Typography>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={openBulkEdit}
+            disabled={bulkBusy}
+          >
+            Bulk update…
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setBulkDeleteConfirm(true)}
+            disabled={bulkBusy}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button
+            size="small"
+            onClick={() => setSelectedIds([])}
+            disabled={bulkBusy}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open the test case.
+      </Typography>
       <DataTable
         rows={testCases}
         columns={columns}
@@ -738,13 +982,47 @@ const TestCasesPage: React.FC = () => {
         loading={loading}
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
-        onRowClick={(params) => navigate(`/test-cases/${params.id}`)}
+        onRowDoubleClick={({ id }) => navigate(`/test-cases/${id}`)}
         getRowId={(row) => row.id}
+        checkboxSelection={userCanEdit}
+        rowSelectionModel={selectedIds}
+        onRowSelectionModelChange={setSelectedIds}
+      />
+
+      {/* Bulk-delete confirmation */}
+      <ConfirmDialog
+        open={bulkDeleteConfirm}
+        title={`Delete ${selectedIds.length} test case(s)?`}
+        message="This soft-deletes every selected test case and unlinks them from any test suites. The action is reversible only via direct DB access."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setBulkDeleteConfirm(false)}
+        onConfirm={handleBulkDelete}
+      />
+
+      <BulkEditDialog
+        open={bulkEditOpen}
+        onClose={() => setBulkEditOpen(false)}
+        entityLabel="test case"
+        entityPlural="test cases"
+        selectionCount={selectedIds.length}
+        bulkMax={BULK_MAX}
+        fields={bulkFields}
+        bulk={bulkEdit}
+        busy={bulkBusy}
+        onApply={handleBulkApply}
+        result={bulkResult}
       />
 
       {/* Create/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+      >
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
           {editingCase.id ? 'Edit Test Case' : 'New Test Case'}
           {editingCase.id && editingTestCaseId && (
             <Chip label={editingTestCaseId} size="small" variant="outlined" sx={{ fontWeight: 700, fontSize: 12 }} />
@@ -993,7 +1271,12 @@ const TestCasesPage: React.FC = () => {
                     value={step.testData || ''}
                     onChange={(e) => handleStepChange(idx, 'testData', e.target.value)}
                   />
-                  <IconButton onClick={() => handleRemoveStep(idx)} color="error" sx={{ mt: 0.5 }}>
+                  <IconButton
+                    onClick={() => handleRemoveStep(idx)}
+                    color="error"
+                    sx={{ mt: 0.5 }}
+                    aria-label={`Remove step ${idx + 1}`}
+                  >
                     <DeleteIcon />
                   </IconButton>
                 </Box>
@@ -1039,7 +1322,7 @@ const TestCasesPage: React.FC = () => {
 
       {/* Upload Test Cases Dialog */}
       <Dialog open={uploadDialogOpen} onClose={() => { setUploadDialogOpen(false); setUploadFile(null); setUploadProjectId(''); setUploadEpicId(''); setUploadUserStoryId(''); }} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>Upload Test Cases</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>Upload Test Cases</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12}>

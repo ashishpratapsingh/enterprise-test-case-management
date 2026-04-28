@@ -21,6 +21,9 @@ jest.mock('../services/defectService', () => ({
     uploadAttachment: jest.fn(),
     getAttachments: jest.fn(),
     deleteAttachment: jest.fn(),
+    bulkDelete: jest.fn(),
+    bulkTransitionStatus: jest.fn(),
+    bulkAssign: jest.fn(),
   },
 }));
 
@@ -161,5 +164,100 @@ describe('DefectsPage', () => {
     );
     await waitFor(() => expect(defectService.getAll).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /new defect/i })).not.toBeInTheDocument();
+  });
+
+  // ── Bulk operations ─────────────────────────────────────────────────────
+
+  it('shows the bulk action bar only after a row is selected', async () => {
+    render(
+      <TestProviders>
+        <DefectsPage />
+      </TestProviders>,
+    );
+    await waitFor(() => expect(defectService.getAll).toHaveBeenCalled());
+
+    // Bar is hidden initially.
+    expect(screen.queryByRole('toolbar', { name: /bulk actions/i })).not.toBeInTheDocument();
+
+    // Tick the first row's checkbox.
+    fireEvent.click(screen.getByLabelText('select-row-d-1'));
+    const bar = await screen.findByRole('toolbar', { name: /bulk actions/i });
+    expect(within(bar).getByText(/1 selected/i)).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+  });
+
+  it('non-editor never sees row checkboxes or the bulk bar', async () => {
+    render(
+      <TestProviders user={{ id: 'v-1', email: 'v@tcm.com', role: 'viewer', role_name: 'Viewer' }}>
+        <DefectsPage />
+      </TestProviders>,
+    );
+    await waitFor(() => expect(defectService.getAll).toHaveBeenCalled());
+    expect(screen.queryByLabelText('select-row-d-1')).not.toBeInTheDocument();
+    expect(screen.queryByText(/selected$/i)).not.toBeInTheDocument();
+  });
+
+  it('bulk delete calls the service with the selected IDs and refetches', async () => {
+    defectService.bulkDelete.mockResolvedValue({ succeeded: ['d-1', 'd-2'], failed: [] });
+
+    render(
+      <TestProviders>
+        <DefectsPage />
+      </TestProviders>,
+    );
+    await waitFor(() => expect(defectService.getAll).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByLabelText('select-row-d-1'));
+    fireEvent.click(screen.getByLabelText('select-row-d-2'));
+    const bar = await screen.findByRole('toolbar', { name: /bulk actions/i });
+    expect(within(bar).getByText(/2 selected/i)).toBeInTheDocument();
+
+    fireEvent.click(within(bar).getByRole('button', { name: /^delete$/i }));
+    // Confirm dialog → click the Delete inside it.
+    const confirmDialog = await screen.findByRole('dialog');
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() =>
+      expect(defectService.bulkDelete).toHaveBeenCalledWith(['d-1', 'd-2']),
+    );
+    await waitFor(() => expect(defectService.getAll).toHaveBeenCalledTimes(2));
+  });
+
+  it('bulk status transition through the bulk-update dialog sends the chosen status', async () => {
+    defectService.bulkTransitionStatus.mockResolvedValue({
+      succeeded: ['d-1'],
+      failed: [],
+    });
+
+    render(
+      <TestProviders>
+        <DefectsPage />
+      </TestProviders>,
+    );
+    await waitFor(() => expect(defectService.getAll).toHaveBeenCalled());
+
+    // Open the JIRA-style bulk-update dialog from the action bar.
+    fireEvent.click(screen.getByLabelText('select-row-d-1'));
+    const bar = await screen.findByRole('toolbar', { name: /bulk actions/i });
+    fireEvent.click(within(bar).getByRole('button', { name: /bulk update/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /bulk update/i });
+
+    // Tick "Change status" then pick "In Progress" from the dialog's
+    // own Status dropdown. The Select carries a stable aria-label so
+    // it can be located unambiguously among the other field selects.
+    fireEvent.click(within(dialog).getByLabelText(/change status/i));
+    fireEvent.mouseDown(within(dialog).getByLabelText('Bulk status selector'));
+    const listbox = await screen.findByRole('listbox');
+    fireEvent.click(within(listbox).getByRole('option', { name: /^in progress$/i }));
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^apply to/i }));
+
+    await waitFor(() =>
+      expect(defectService.bulkTransitionStatus).toHaveBeenCalledWith(
+        ['d-1'],
+        'In Progress',
+      ),
+    );
   });
 });

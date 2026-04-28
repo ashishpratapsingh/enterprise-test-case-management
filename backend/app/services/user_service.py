@@ -192,6 +192,70 @@ class UserService:
         )
         return await self.get_user(user.id)
 
+    # ── Bulk operations ───────────────────────────────────────────────────
+    #
+    # Self-protection rules carry over from the per-row methods:
+    # an admin cannot deactivate / delete / role-change themselves.
+    # That row is reported as failed, the rest of the batch proceeds.
+
+    async def bulk_set_active(
+        self,
+        user_ids: list[Any],
+        active: bool,
+        *,
+        requested_by: str | None = None,
+    ) -> dict[str, list]:
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for uid in user_ids:
+            try:
+                await self.set_active(uid, active, requested_by=requested_by)
+                succeeded.append(str(uid))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(uid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_set_role(
+        self,
+        user_ids: list[Any],
+        role_id: str,
+        *,
+        requested_by: str | None = None,
+    ) -> dict[str, list]:
+        """Assign every selected user to ``role_id``. Validates the
+        role exists once up front; per-row failures (NotFound, self-
+        role-change attempt) are reported, not raised."""
+        await self._assert_role_exists(role_id)
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for uid in user_ids:
+            try:
+                if requested_by and str(requested_by) == str(uid):
+                    raise ValidationError("You cannot change your own role.")
+                user = await self.user_repo.update(uid, {"role_id": str(role_id)})
+                if user is None:
+                    raise NotFoundError(f"User with id '{uid}' not found")
+                succeeded.append(str(uid))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(uid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_delete(
+        self,
+        user_ids: list[Any],
+        *,
+        requested_by: str | None = None,
+    ) -> dict[str, list]:
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for uid in user_ids:
+            try:
+                await self.delete_user(uid, requested_by=requested_by)
+                succeeded.append(str(uid))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(uid), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
     # ── Helpers ────────────────────────────────────────────────────────────
 
     async def _assert_role_exists(self, role_id: uuid.UUID | str) -> None:

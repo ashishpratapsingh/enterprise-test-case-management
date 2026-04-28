@@ -51,6 +51,22 @@ export const testSuiteService = {
   async removeTestCase(suiteId: string | number, testCaseId: string | number): Promise<void> {
     await api.delete(`${PREFIX}/${suiteId}/cases/${testCaseId}`);
   },
+
+  // ── Bulk operations ─────────────────────────────────────────────────
+  async bulkDelete(
+    ids: string[],
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-delete`, { ids });
+    return response.data.data;
+  },
+
+  async bulkSetActive(
+    ids: string[],
+    isActive: boolean,
+  ): Promise<{ succeeded: string[]; failed: { id: string; error: string }[] }> {
+    const response = await api.post(`${PREFIX}/bulk-set-active`, { ids, is_active: isActive });
+    return response.data.data;
+  },
 };
 
 export default testSuiteService;

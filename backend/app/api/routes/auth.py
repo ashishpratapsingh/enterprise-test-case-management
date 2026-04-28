@@ -1,6 +1,9 @@
 """Authentication routes."""
 
-from fastapi import APIRouter, Depends, status
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -8,6 +11,7 @@ from app.api.dependencies import (
     get_db,
     success_response,
 )
+from app.core.config import get_settings
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
@@ -16,6 +20,7 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserCreate
 from app.services.auth_service import AuthService
+from app.services.sso_service import SSOService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -114,3 +119,113 @@ async def reset_password(
         token=body.token, new_password=body.new_password
     )
     return success_response(data=result, message=result.get("message", "OK"))
+
+
+# ── SSO (OpenID Connect) ───────────────────────────────────────────────────
+
+
+@router.get(
+    "/sso/config",
+    response_model=None,
+    status_code=status.HTTP_200_OK,
+    summary="Public-ish SSO config (whether the button should appear)",
+)
+async def get_sso_config(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Tell the frontend whether SSO is wired and what to label the
+    button. Never returns the client secret. No auth required —
+    LoginPage hits this before the user has a session."""
+    service = SSOService(db)
+    return success_response(
+        data={
+            "enabled": service.is_configured(),
+            "provider_name": service.settings.OIDC_PROVIDER_NAME,
+            "login_url": "/api/v1/auth/sso/login",
+        },
+        message="SSO config",
+    )
+
+
+@router.get(
+    "/sso/login",
+    response_model=None,
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    summary="Begin SSO login — redirects to the IdP",
+)
+async def sso_login(
+    return_to: str | None = Query(
+        default=None,
+        description="Optional path to land on after successful login (e.g. /dashboard)",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Generates a signed state, redirects to the IdP's authorize URL.
+    The browser follows the redirect; the IdP eventually calls our
+    /sso/callback."""
+    service = SSOService(db)
+    url = await service.begin_login(return_to=return_to)
+    return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+
+@router.get(
+    "/sso/callback",
+    response_model=None,
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    summary="OIDC callback — exchanges code, issues JWTs, redirects to frontend",
+)
+async def sso_callback(
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None, description="IdP-supplied error code"),
+    error_description: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Receive the IdP's redirect, exchange code for tokens, look up
+    or auto-provision the user, and bounce back to the frontend with
+    our own JWTs in the URL fragment.
+
+    Putting tokens in the **fragment** (``#``) keeps them out of
+    server logs and Referer headers — the frontend reads them client-
+    side and immediately stores them.
+    """
+    settings = get_settings()
+    base = settings.APP_BASE_URL.rstrip("/")
+
+    # IdP-supplied error: bounce to the SSO landing with an error
+    # query string so the UI can show a friendly message.
+    if error:
+        msg = error_description or error
+        return RedirectResponse(
+            f"{base}/sso/callback?error={quote(msg, safe='')}",
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        )
+
+    if not code or not state:
+        return RedirectResponse(
+            f"{base}/sso/callback?error={quote('Missing code or state', safe='')}",
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        )
+
+    service = SSOService(db)
+    try:
+        tokens = await service.handle_callback(code=code, state=state)
+    except Exception as exc:  # noqa: BLE001 — surfaced via redirect
+        # All exceptions become user-facing error messages on the
+        # SSO landing page. We don't want to leak stack traces.
+        return RedirectResponse(
+            f"{base}/sso/callback?error={quote(str(exc), safe='')}",
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        )
+
+    return_to = tokens.get("return_to") or "/dashboard"
+    fragment = (
+        f"access_token={tokens['access_token']}"
+        f"&refresh_token={tokens['refresh_token']}"
+        f"&user_id={tokens['user_id']}"
+        f"&return_to={quote(return_to, safe='')}"
+    )
+    return RedirectResponse(
+        f"{base}/sso/callback#{fragment}",
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    )

@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import useDefectAttachments from '../hooks/useDefectAttachments';
+import useIsMobile from '../hooks/useIsMobile';
 import {
+  Alert,
   Box,
   Button,
   Typography,
@@ -27,6 +29,8 @@ import {
   Radio,
   Tooltip,
   FormHelperText,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -40,6 +44,7 @@ import {
   Image as ImageIcon,
   Videocam,
   InsertDriveFile,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { GridColDef, GridPaginationModel } from '../components/common/DataTable';
 import { useSnackbar } from 'notistack';
@@ -50,6 +55,9 @@ import testCaseService from '../services/testCaseService';
 import epicService from '../services/epicService';
 import userStoryService from '../services/userStoryService';
 import userService from '../services/userService';
+import integrationService from '../services/integrationService';
+import useBulkEdit, { BulkFieldSpec } from '../hooks/useBulkEdit';
+import BulkEditDialog from '../components/common/BulkEditDialog';
 import { useAuth } from '../hooks/useAuth';
 import { canEdit } from '../utils/roleGuard';
 import { useProjects } from '../contexts/ProjectContext';
@@ -107,6 +115,9 @@ const DefectsPage: React.FC = () => {
   const { user } = useAuth();
   const userCanEdit = user ? canEdit(user.role) : false;
   const { projects } = useProjects();
+  // Below the MUI ``md`` breakpoint we promote the create/edit and view
+  // dialogs to full-screen so forms don't get crammed into a narrow card.
+  const isMobile = useIsMobile();
 
   // Data
   const [defects, setDefects] = useState<any[]>([]);
@@ -130,9 +141,29 @@ const DefectsPage: React.FC = () => {
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewDefect, setViewDefect] = useState<any>(null);
 
+  // JIRA browse URL prefix — fetched lazily once and cached so the
+  // "Open in JIRA" link can render on the view dialog. Empty when JIRA
+  // isn't configured server-side.
+  const [jiraBaseUrl, setJiraBaseUrl] = useState<string>('');
+
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Bulk operations — selected row IDs come from the DataTable's checkbox
+  // column. The bulk-edit modal lets the user choose any combination of
+  // status / severity / priority / assignee changes in one apply step,
+  // matching the JIRA "Bulk Change" UX. Delete stays separate (destructive).
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Bulk-edit modal state. Field declarations live below users[] so
+  // they can populate the assignee options at render time.
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkResult, setBulkResult] = useState<null | {
+    perField: { field: string; succeeded: number; failed: number; firstError?: string }[];
+  }>(null);
 
   // Epics & User Stories for dropdowns
   const [allEpics, setAllEpics] = useState<{ id: string; title: string; project_id: string }[]>([]);
@@ -328,11 +359,164 @@ const DefectsPage: React.FC = () => {
     }
   };
 
+  // ── Bulk operation handlers ──────────────────────────────────────────────
+  // Each calls the matching defectService.bulk* endpoint, surfaces a
+  // succeeded/failed snackbar summary, refetches the list, and clears
+  // selection. Per-row failures (e.g. illegal status transitions, missing
+  // IDs) are rolled into a warning snackbar — the rest still apply.
+
+  const reportBulkResult = (
+    label: string,
+    result: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (result.succeeded.length > 0) {
+      enqueueSnackbar(
+        `${result.succeeded.length} defect(s) ${label}`,
+        { variant: 'success' },
+      );
+    }
+    if (result.failed.length > 0) {
+      enqueueSnackbar(
+        `${result.failed.length} defect(s) skipped: ${result.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const result = await defectService.bulkDelete(selectedIds);
+      reportBulkResult('deleted', result);
+      setSelectedIds([]);
+      setBulkDeleteConfirm(false);
+      fetchDefects();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // ── Bulk-update field spec ──────────────────────────────────────────────
+  // Drives BulkEditDialog. The hook handles state, per-field
+  // validation, and the "at least one ticked" / "all ticked have
+  // values" rules. Page just maps changedFields → backend calls
+  // below.
+  const bulkFields: BulkFieldSpec[] = [
+    {
+      key: 'status',
+      label: 'Change status',
+      type: 'select',
+      // Status select carries an aria-label so the existing
+      // DefectsPage test can locate it unambiguously.
+      inputAriaLabel: 'Bulk status selector',
+      options: STATUSES.map((s) => ({ value: s, label: s })),
+    },
+    {
+      key: 'severity',
+      label: 'Change severity',
+      type: 'select',
+      options: SEVERITIES.map((s) => ({ value: s, label: s })),
+    },
+    {
+      key: 'priority',
+      label: 'Change priority',
+      type: 'select',
+      options: PRIORITIES.map((p) => ({ value: p, label: p })),
+    },
+    {
+      key: 'assignedTo',
+      label: 'Change assignee',
+      type: 'select',
+      // Empty value = unassign — legitimate, so not required.
+      required: false,
+      options: [
+        { value: '', label: 'Unassigned' },
+        ...users.map((u) => ({ value: u.id, label: u.full_name || u.email })),
+      ],
+    },
+  ];
+  const bulkEdit = useBulkEdit(bulkFields);
+
+  const openBulkEdit = () => {
+    bulkEdit.reset();
+    setBulkResult(null);
+    setBulkEditOpen(true);
+  };
+
+  // Run the chosen field changes sequentially against the bulk endpoints
+  // and aggregate per-field results so the dialog can show a structured
+  // summary (succeeded / failed counts per field), not just one snackbar.
+  const handleBulkApply = async () => {
+    if (selectedIds.length === 0) return;
+
+    type FieldResult = { field: string; succeeded: number; failed: number; firstError?: string };
+    const summarize = (
+      label: string,
+      r: { succeeded: string[]; failed: { id: string; error: string }[] },
+    ): FieldResult => ({
+      field: label,
+      succeeded: r.succeeded.length,
+      failed: r.failed.length,
+      firstError: r.failed[0]?.error,
+    });
+
+    const changes = bulkEdit.changedFields;
+    setBulkBusy(true);
+    const perField: FieldResult[] = [];
+    try {
+      if (changes.status) {
+        const r = await defectService.bulkTransitionStatus(selectedIds, changes.status);
+        perField.push(summarize(`Status → ${changes.status}`, r));
+      }
+      if ('assignedTo' in changes) {
+        const r = await defectService.bulkAssign(selectedIds, changes.assignedTo || null);
+        const target = changes.assignedTo
+          ? users.find((u) => u.id === changes.assignedTo)?.full_name ||
+            users.find((u) => u.id === changes.assignedTo)?.email ||
+            'user'
+          : 'Unassigned';
+        perField.push(summarize(`Assignee → ${target}`, r));
+      }
+      const sevPriPayload: { severity?: string; priority?: string } = {};
+      if (changes.severity) sevPriPayload.severity = changes.severity;
+      if (changes.priority) sevPriPayload.priority = changes.priority;
+      if (sevPriPayload.severity || sevPriPayload.priority) {
+        const r = await defectService.bulkUpdate(selectedIds, sevPriPayload);
+        const labels = [
+          sevPriPayload.severity ? `Severity → ${sevPriPayload.severity}` : '',
+          sevPriPayload.priority ? `Priority → ${sevPriPayload.priority}` : '',
+        ].filter(Boolean).join(' / ');
+        perField.push(summarize(labels, r));
+      }
+      setBulkResult({ perField });
+      // Wipe the selection: stale checkmarks on rows that were just
+      // mutated would mislead the user about which rows still need
+      // attention. The Done button on the dialog also closes it.
+      setSelectedIds([]);
+      fetchDefects();
+    } catch {
+      enqueueSnackbar('Bulk update failed', { variant: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const [viewAttachments, setViewAttachments] = useState<any[]>([]);
 
   const handleView = async (row: any) => {
     setViewDefect(row);
     setViewDialogOpen(true);
+    // Lazy-load JIRA config the first time someone views a JIRA-linked
+    // defect. integrationService caches across calls so this is cheap.
+    if (row?.jira_ticket_id && !jiraBaseUrl) {
+      integrationService
+        .getJiraConfig()
+        .then((cfg) => setJiraBaseUrl(cfg.base_url || ''))
+        .catch(() => {});
+    }
     if (row.id) {
       try {
         const atts = await defectService.getAttachments(row.id);
@@ -562,7 +746,14 @@ const DefectsPage: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Defects
       </Typography>
 
@@ -632,6 +823,86 @@ const DefectsPage: React.FC = () => {
         )}
       </Box>
 
+      {/* Bulk action bar — visible only when rows are selected. JIRA-
+          style: a single primary "Bulk update" button opens a modal with
+          per-field change toggles. Delete stays inline as a destructive
+          action with its own confirm. */}
+      {userCanEdit && selectedIds.length > 0 && (
+        <Box
+          role="toolbar"
+          aria-label="Bulk actions"
+          mb={1.5}
+          px={2}
+          py={1}
+          display="flex"
+          alignItems="center"
+          gap={1.5}
+          sx={{
+            borderRadius: 2,
+            backgroundColor: 'rgba(245, 124, 0, 0.08)',
+            border: '1px solid rgba(245, 124, 0, 0.3)',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedIds.length} selected
+          </Typography>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={openBulkEdit}
+            disabled={bulkBusy}
+          >
+            Bulk update…
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setBulkDeleteConfirm(true)}
+            disabled={bulkBusy}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button
+            size="small"
+            onClick={() => setSelectedIds([])}
+            disabled={bulkBusy}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
+
+      <ConfirmDialog
+        open={bulkDeleteConfirm}
+        title={`Delete ${selectedIds.length} defect(s)?`}
+        message="This soft-deletes every selected defect. The action is reversible only via direct DB access."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setBulkDeleteConfirm(false)}
+        onConfirm={handleBulkDelete}
+      />
+
+      <BulkEditDialog
+        open={bulkEditOpen}
+        onClose={() => setBulkEditOpen(false)}
+        entityLabel="defect"
+        selectionCount={selectedIds.length}
+        fields={bulkFields}
+        bulk={bulkEdit}
+        busy={bulkBusy}
+        onApply={handleBulkApply}
+        result={bulkResult}
+      />
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open defect details.
+      </Typography>
       {/* Data Table */}
       <DataTable
         rows={defects}
@@ -640,13 +911,22 @@ const DefectsPage: React.FC = () => {
         loading={loading}
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
-        onRowClick={(params) => handleView(params)}
+        onRowDoubleClick={({ row }) => handleView(row)}
         getRowId={(row) => row.id}
+        checkboxSelection={userCanEdit}
+        rowSelectionModel={selectedIds}
+        onRowSelectionModelChange={setSelectedIds}
       />
 
       {/* ── Create/Edit Dialog ─────────────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isMobile}
+      >
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
           <BugIcon />
           {editingDefect?.id ? 'Edit Defect' : 'New Defect'}
         </DialogTitle>
@@ -1002,7 +1282,7 @@ const DefectsPage: React.FC = () => {
                                   <Chip label={tc.status} size="small" variant="outlined" sx={{ fontSize: 11 }} />
                                   {tc.epic_title && (
                                     <Tooltip title={`Epic: ${tc.epic_title}`} arrow>
-                                      <Chip label={`Epic: ${tc.epic_title.length > 20 ? tc.epic_title.substring(0, 20) + '...' : tc.epic_title}`} size="small" sx={{ fontSize: 11, maxWidth: 180, backgroundColor: 'rgba(26, 35, 126, 0.08)', color: '#1a237e', border: '1px solid rgba(26, 35, 126, 0.2)' }} />
+                                      <Chip label={`Epic: ${tc.epic_title.length > 20 ? tc.epic_title.substring(0, 20) + '...' : tc.epic_title}`} size="small" sx={{ fontSize: 11, maxWidth: 180, backgroundColor: 'rgba(26, 35, 126, 0.08)', color: 'secondary.main', border: '1px solid rgba(26, 35, 126, 0.2)' }} />
                                     </Tooltip>
                                   )}
                                   {tc.user_story_title && (
@@ -1056,21 +1336,26 @@ const DefectsPage: React.FC = () => {
         onClose={() => setViewDialogOpen(false)}
         maxWidth="md"
         fullWidth
-        PaperProps={{ sx: { maxHeight: '85vh' } }}
+        fullScreen={isMobile}
+        PaperProps={{ sx: { maxHeight: isMobile ? '100vh' : '85vh' } }}
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box display="flex" alignItems="center" gap={1}>
             <BugIcon />
             Defect Details
           </Box>
-          <IconButton size="small" onClick={() => setViewDialogOpen(false)}>
+          <IconButton
+            size="small"
+            onClick={() => setViewDialogOpen(false)}
+            aria-label="Close"
+          >
             <CloseIcon />
           </IconButton>
         </DialogTitle>
         {viewDefect && (
           <DialogContent dividers>
             {/* Header info */}
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 1, color: '#1a237e' }}>
+            <Typography variant="h6" fontWeight={700} sx={{ mb: 1, color: 'secondary.main' }}>
               {viewDefect.title}
             </Typography>
 
@@ -1133,7 +1418,35 @@ const DefectsPage: React.FC = () => {
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <DetailRow label="Jira Ticket" value={viewDefect.jira_ticket_id} />
+                <DetailRow
+                  label="Jira Ticket"
+                  value={
+                    viewDefect.jira_ticket_id ? (
+                      jiraBaseUrl ? (
+                        <Box
+                          component="a"
+                          href={integrationService.buildJiraBrowseUrl(jiraBaseUrl, viewDefect.jira_ticket_id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{
+                            color: 'primary.main',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                          aria-label={`Open ${viewDefect.jira_ticket_id} in JIRA`}
+                        >
+                          {viewDefect.jira_ticket_id}
+                          <OpenInNewIcon fontSize="inherit" />
+                        </Box>
+                      ) : (
+                        viewDefect.jira_ticket_id
+                      )
+                    ) : null
+                  }
+                />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <DetailRow label="Assignee" value={viewDefect.assigned_to_name} />

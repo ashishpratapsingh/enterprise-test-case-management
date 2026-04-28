@@ -360,7 +360,7 @@ const ExecutionPage: React.FC = () => {
           Back
         </Button>
         <Box sx={{ flexGrow: 1 }}>
-          <Typography variant="h5" fontWeight={700} sx={{ color: '#1a237e' }}>
+          <Typography variant="h5" fontWeight={700} sx={{ color: 'secondary.main' }}>
             {testRun.name}
           </Typography>
           {testRun.environment && (
@@ -518,7 +518,7 @@ const ExecutionPage: React.FC = () => {
                       {testCase.test_case_id && (
                         <Chip label={testCase.test_case_id} size="small" variant="outlined" sx={{ fontWeight: 600, fontSize: 11 }} />
                       )}
-                      <Typography variant="h6" fontWeight={700} sx={{ color: '#1a237e' }}>
+                      <Typography variant="h6" fontWeight={700} sx={{ color: 'secondary.main' }}>
                         {testCase.title}
                       </Typography>
                     </Box>
@@ -588,7 +588,7 @@ const ExecutionPage: React.FC = () => {
               {/* Steps */}
               <Box sx={{ p: 2 }}>
                 <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ color: '#1a237e' }}>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ color: 'secondary.main' }}>
                     Test Steps ({steps.length})
                   </Typography>
                   {steps.length > 0 && (

@@ -191,3 +191,94 @@ class DefectService:
         if defect is None:
             raise NotFoundError(f"Defect with id '{defect_id}' not found")
         return defect
+
+    # ── Bulk operations ────────────────────────────────────────────────
+    #
+    # All bulk methods follow the same pattern: best-effort per-id, never
+    # abort on a single failure. Returns a {succeeded, failed} report so
+    # the UI can show partial progress (e.g., "5 of 7 deleted; 2 not
+    # found"). Each per-row mutation goes through the existing single-row
+    # method so audit hooks fire as normal.
+
+    async def bulk_delete(self, defect_ids: list[Any]) -> dict[str, list]:
+        """Soft-delete each defect. Missing IDs are reported, not raised."""
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for did in defect_ids:
+            try:
+                await self.delete_defect(did)
+                succeeded.append(str(did))
+            except NotFoundError as e:
+                failed.append({"id": str(did), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_transition_status(
+        self, defect_ids: list[Any], new_status: str
+    ) -> dict[str, list]:
+        """Transition each defect to ``new_status``. Disallowed transitions
+        and missing IDs are skipped and reported."""
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for did in defect_ids:
+            try:
+                await self.transition_status(did, new_status)
+                succeeded.append(str(did))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(did), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_assign(
+        self, defect_ids: list[Any], assigned_to: Any | None
+    ) -> dict[str, list]:
+        """Assign every defect to ``assigned_to`` (or unassign if None).
+
+        Does not validate that the user exists — the FK constraint will
+        surface that. Missing defect IDs are reported, not raised.
+        """
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for did in defect_ids:
+            try:
+                await self.update_defect(
+                    did, {"assigned_to": str(assigned_to) if assigned_to else None}
+                )
+                succeeded.append(str(did))
+            except NotFoundError as e:
+                failed.append({"id": str(did), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}
+
+    async def bulk_update(
+        self,
+        defect_ids: list[Any],
+        *,
+        severity: str | None = None,
+        priority: str | None = None,
+    ) -> dict[str, list]:
+        """Update plain fields (severity, priority) across many defects.
+
+        Status transitions and assignment go through their own endpoints
+        because they each carry domain rules (transition table / FK /
+        notification side-effects). This one is the simple-column
+        update used by the JIRA-style bulk-edit dialog.
+
+        At least one of ``severity`` / ``priority`` must be set —
+        callers shouldn't invoke this with no changes.
+        """
+        if severity is None and priority is None:
+            raise ValidationError("At least one field must be provided to bulk_update")
+
+        update_data: dict[str, Any] = {}
+        if severity is not None:
+            update_data["severity"] = severity
+        if priority is not None:
+            update_data["priority"] = priority
+
+        succeeded: list[str] = []
+        failed: list[dict[str, str]] = []
+        for did in defect_ids:
+            try:
+                await self.update_defect(did, update_data)
+                succeeded.append(str(did))
+            except (NotFoundError, ValidationError) as e:
+                failed.append({"id": str(did), "error": str(e)})
+        return {"succeeded": succeeded, "failed": failed}

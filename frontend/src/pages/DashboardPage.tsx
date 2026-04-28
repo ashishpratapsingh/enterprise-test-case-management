@@ -194,7 +194,13 @@ const DashboardPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" fontWeight={600}>
+        <Typography
+          variant="h4"
+          fontWeight={600}
+          sx={(theme) => ({
+            color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          })}
+        >
           Dashboard
         </Typography>
       </Box>
@@ -205,8 +211,8 @@ const DashboardPage: React.FC = () => {
           mb: 3,
           borderRadius: 2,
           backgroundColor: 'rgba(26, 35, 126, 0.04)',
-          color: '#1a237e',
-          '& .MuiAlert-icon': { color: '#1a237e' },
+          color: 'secondary.main',
+          '& .MuiAlert-icon': { color: 'secondary.main' },
           border: '1px solid rgba(26, 35, 126, 0.1)',
         }}
       >

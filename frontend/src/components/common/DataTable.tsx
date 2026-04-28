@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useRef } from 'react';
+import React, { useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   Box,
   CircularProgress,
@@ -6,6 +6,7 @@ import {
   Select,
   MenuItem,
   Typography,
+  useTheme,
 } from '@mui/material';
 import {
   FirstPage as FirstPageIcon,
@@ -18,6 +19,7 @@ import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-communi
 import type {
   ColDef,
   RowClickedEvent,
+  RowDoubleClickedEvent,
   ICellRendererParams,
 } from 'ag-grid-community';
 
@@ -54,6 +56,7 @@ interface DataTableProps {
   paginationModel?: GridPaginationModel;
   onPaginationModelChange?: (model: GridPaginationModel) => void;
   onRowClick?: (params: any) => void;
+  onRowDoubleClick?: (params: any) => void;
   pageSizeOptions?: number[];
   autoHeight?: boolean;
   density?: 'compact' | 'standard' | 'comfortable';
@@ -106,7 +109,7 @@ const rowHeightMap = { compact: 36, standard: 44, comfortable: 56 };
 
 // ── Custom AG Grid theme matching SabPaisa look ─────────────────────────────
 
-const sabpaisaTheme = themeQuartz.withParams({
+const sabpaisaThemeLight = themeQuartz.withParams({
   accentColor: '#f57c00',
   borderColor: 'rgba(26, 35, 126, 0.08)',
   borderRadius: 8,
@@ -123,6 +126,24 @@ const sabpaisaTheme = themeQuartz.withParams({
   headerFontSize: 13,
 });
 
+const sabpaisaThemeDark = themeQuartz.withParams({
+  accentColor: '#f57c00',
+  borderColor: 'rgba(255, 255, 255, 0.08)',
+  borderRadius: 8,
+  browserColorScheme: 'dark',
+  fontFamily: '"DM Sans", "Inter", sans-serif',
+  fontSize: 13,
+  backgroundColor: '#1a1d27',
+  headerBackgroundColor: '#252836',
+  headerFontWeight: 600,
+  headerTextColor: '#9aa0aa',
+  rowHoverColor: 'rgba(245, 124, 0, 0.08)',
+  selectedRowBackgroundColor: 'rgba(245, 124, 0, 0.16)',
+  oddRowBackgroundColor: '#1a1d27',
+  foregroundColor: '#e6e7eb',
+  headerFontSize: 13,
+});
+
 // ── Component ───────────────────────────────────────────────────────────────
 
 const DataTable: React.FC<DataTableProps> = ({
@@ -133,13 +154,19 @@ const DataTable: React.FC<DataTableProps> = ({
   paginationModel = { page: 0, pageSize: 25 },
   onPaginationModelChange,
   onRowClick,
+  onRowDoubleClick,
   pageSizeOptions = [10, 25, 50, 100],
   density = 'standard',
   getRowId,
   checkboxSelection = false,
+  rowSelectionModel,
+  onRowSelectionModelChange,
   getRowStyle,
 }) => {
   const gridRef = useRef<AgGridReact>(null);
+  const muiTheme = useTheme();
+  const sabpaisaTheme =
+    muiTheme.palette.mode === 'dark' ? sabpaisaThemeDark : sabpaisaThemeLight;
 
   const agColumns = useMemo(() => mapColumns(columns), [columns]);
 
@@ -162,6 +189,52 @@ const DataTable: React.FC<DataTableProps> = ({
     },
     [onRowClick, getRowId],
   );
+
+  // Double-click is treated as "open detail" (industry-standard for tables
+  // backed by editable rows). Same button/anchor guard as single-click so
+  // double-clicking an action button never bubbles into a detail open.
+  const onRowDoubleClicked = useCallback(
+    (event: RowDoubleClickedEvent) => {
+      if (!onRowDoubleClick) return;
+      const target = event.event?.target as HTMLElement | null;
+      if (target && (target.closest('button') || target.closest('a') || target.closest('[role="button"]'))) {
+        return;
+      }
+      onRowDoubleClick({ row: event.data, id: getRowId ? getRowId(event.data) : event.data?.id });
+    },
+    [onRowDoubleClick, getRowId],
+  );
+
+  // Two-way sync: when the parent mutates ``rowSelectionModel`` (e.g.
+  // a "Clear selection" button or fetching a new page), reflect that
+  // back into AG Grid's checkbox state. Without this the React state
+  // and the visible checkboxes drift out of sync — a Clear click wipes
+  // the IDs in state but leaves every checkbox ticked.
+  //
+  // Comparing target vs. current before mutating prevents a feedback
+  // loop with onSelectionChanged below.
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api || !rowSelectionModel) return;
+    const target = new Set(((rowSelectionModel as any[]) || []).map((id: any) => String(id)));
+    const currentRows: any[] = api.getSelectedRows();
+    const currentIds = new Set(
+      currentRows.map((r: any) => String(getRowId ? getRowId(r) : r?.id)),
+    );
+    if (
+      target.size === currentIds.size &&
+      Array.from(target).every((id) => currentIds.has(id))
+    ) {
+      return;
+    }
+    api.forEachNode((node: any) => {
+      const id = String(getRowId ? getRowId(node.data) : node.data?.id);
+      const shouldBeSelected = target.has(id);
+      if (node.isSelected() !== shouldBeSelected) {
+        node.setSelected(shouldBeSelected, false);
+      }
+    });
+  }, [rowSelectionModel, getRowId, rows]);
 
   const getRowIdFn = useMemo(() => {
     if (getRowId) return (params: any) => String(getRowId(params.data));
@@ -192,13 +265,17 @@ const DataTable: React.FC<DataTableProps> = ({
       sx={{
         width: '100%',
         position: 'relative',
+        // Borders use the theme divider so AG Grid chrome stays consistent
+        // with the rest of the surface in both light and dark modes.
         '& .ag-root-wrapper': {
           borderRadius: '8px 8px 0 0',
-          border: '1px solid rgba(26, 35, 126, 0.08)',
+          border: 1,
+          borderColor: 'divider',
           borderBottom: 'none',
         },
         '& .ag-header': {
-          borderBottom: '2px solid rgba(26, 35, 126, 0.08)',
+          borderBottom: 2,
+          borderColor: 'divider',
         },
       }}
     >
@@ -213,12 +290,17 @@ const DataTable: React.FC<DataTableProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: 'rgba(255,255,255,0.7)',
+            // Loading veil tracks the active palette — pure white shines
+            // distractingly through the dark theme.
+            backgroundColor: (theme) =>
+              theme.palette.mode === 'dark'
+                ? 'rgba(15,17,23,0.7)'
+                : 'rgba(255,255,255,0.7)',
             zIndex: 10,
             borderRadius: '8px',
           }}
         >
-          <CircularProgress sx={{ color: '#f57c00' }} />
+          <CircularProgress sx={{ color: 'primary.main' }} />
         </Box>
       )}
       <Box sx={{ width: '100%', height: gridHeight - 52 }}>
@@ -233,19 +315,39 @@ const DataTable: React.FC<DataTableProps> = ({
           pagination={false}
           suppressPaginationPanel
           onRowClicked={onRowClicked}
+          onRowDoubleClicked={onRowDoubleClicked}
           rowSelection={
-            // AG Grid v32+ object form. `enableClickSelection: false`
-            // replaces the deprecated top-level `suppressRowClickSelection`.
+            // AG Grid v32+ object form. ``enableClickSelection: false``
+            // replaces the deprecated top-level ``suppressRowClickSelection``.
+            // When checkboxSelection is on we show a checkbox column +
+            // header checkbox so the user can multi-select rows.
             checkboxSelection
-              ? { mode: 'multiRow', enableClickSelection: false }
+              ? {
+                  mode: 'multiRow',
+                  enableClickSelection: false,
+                  checkboxes: true,
+                  headerCheckbox: true,
+                }
               : undefined
           }
+          onSelectionChanged={(event) => {
+            if (!onRowSelectionModelChange) return;
+            const selectedRows = event.api.getSelectedRows();
+            const ids = selectedRows.map((r: any) =>
+              getRowId ? getRowId(r) : r?.id,
+            );
+            onRowSelectionModelChange(ids);
+          }}
           animateRows
           domLayout="normal"
           getRowStyle={getRowStyle}
         />
       </Box>
-      {/* Custom Pagination Bar */}
+      {/* Custom Pagination Bar
+          Subtle off-surface tone so the bar reads as chrome distinct
+          from the table rows above it. Light mode keeps the original
+          near-white; dark mode flips to a muted dark-gray that matches
+          the AG Grid header. */}
       <Box
         sx={{
           display: 'flex',
@@ -255,8 +357,10 @@ const DataTable: React.FC<DataTableProps> = ({
           py: 0.5,
           height: 52,
           borderRadius: '0 0 8px 8px',
-          border: '1px solid rgba(26, 35, 126, 0.08)',
-          backgroundColor: '#f8f9fc',
+          border: 1,
+          borderColor: 'divider',
+          backgroundColor: (theme) =>
+            theme.palette.mode === 'dark' ? '#252836' : '#f8f9fc',
         }}
       >
         <Box display="flex" alignItems="center" gap={1}>

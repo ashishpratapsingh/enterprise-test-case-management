@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import {
   AppBar,
@@ -18,6 +18,8 @@ import {
   Typography,
   Avatar,
   Tooltip,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -33,9 +35,14 @@ import {
   History as AuditIcon,
   AccountCircle,
   ChevronLeft as ChevronLeftIcon,
+  Brightness4 as DarkModeIcon,
+  Brightness7 as LightModeIcon,
+  Security as SecurityIcon,
 } from '@mui/icons-material';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../hooks/useAuth';
 import { canManageUsers } from '../../utils/roleGuard';
+import { useColorMode } from '../../contexts/ColorModeContext';
 import sabpaisaLogo from '../../assets/sabpaisa-logo.svg';
 import sabpaisaLogoWhite from '../../assets/sabpaisa-logo-white.svg';
 
@@ -49,29 +56,54 @@ interface NavItem {
 }
 
 const Layout: React.FC = () => {
-  const [drawerOpen, setDrawerOpen] = useState(true);
+  const muiTheme = useTheme();
+  // ``md`` breakpoint = 900px. Below it, the drawer is a temporary
+  // overlay (taps outside dismiss it) and the main canvas spans the
+  // full viewport. Above it, the drawer is persistent and pushes the
+  // main canvas — same behaviour as before.
+  const isMobile = useMediaQuery(muiTheme.breakpoints.down('md'));
+  const [drawerOpen, setDrawerOpen] = useState(!isMobile);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { mode, toggle: toggleColorMode } = useColorMode();
+  const { t } = useTranslation();
+
+  // Snap drawer state when crossing the breakpoint so it doesn't get
+  // stuck open/closed in the wrong mode after a window resize.
+  useEffect(() => {
+    setDrawerOpen(!isMobile);
+  }, [isMobile]);
+
+  const handleNavigate = (path: string) => {
+    navigate(path);
+    if (isMobile) setDrawerOpen(false);
+  };
 
   const navItems: NavItem[] = [
-    { label: 'Dashboard', path: '/', icon: <DashboardIcon />, visible: true },
-    { label: 'Projects', path: '/projects', icon: <FolderIcon />, visible: true },
-    { label: 'Requirements', path: '/requirements', icon: <RequirementsIcon />, visible: true },
-    { label: 'Test Cases', path: '/test-cases', icon: <DescriptionIcon />, visible: true },
-    { label: 'Test Suites', path: '/test-suites', icon: <SuiteIcon />, visible: true },
-    { label: 'Test Runs', path: '/test-runs', icon: <RunIcon />, visible: true },
-    { label: 'Defects', path: '/defects', icon: <BugIcon />, visible: true },
-    { label: 'Reports', path: '/reports', icon: <ReportIcon />, visible: true },
+    { label: t('nav.dashboard'), path: '/', icon: <DashboardIcon />, visible: true },
+    { label: t('nav.projects'), path: '/projects', icon: <FolderIcon />, visible: true },
+    { label: t('nav.requirements'), path: '/requirements', icon: <RequirementsIcon />, visible: true },
+    { label: t('nav.test_cases'), path: '/test-cases', icon: <DescriptionIcon />, visible: true },
+    { label: t('nav.test_suites'), path: '/test-suites', icon: <SuiteIcon />, visible: true },
+    { label: t('nav.test_runs'), path: '/test-runs', icon: <RunIcon />, visible: true },
+    { label: t('nav.defects'), path: '/defects', icon: <BugIcon />, visible: true },
+    { label: t('nav.reports'), path: '/reports', icon: <ReportIcon />, visible: true },
     {
-      label: 'Users',
+      label: t('nav.users'),
       path: '/users',
       icon: <PeopleIcon />,
       visible: user ? canManageUsers(user.role) : false,
     },
     {
-      label: 'Audit Log',
+      label: t('nav.roles'),
+      path: '/roles',
+      icon: <SecurityIcon />,
+      visible: user ? canManageUsers(user.role) : false,
+    },
+    {
+      label: t('nav.audit_log'),
       path: '/audit',
       icon: <AuditIcon />,
       visible: user ? canManageUsers(user.role) : false,
@@ -93,13 +125,46 @@ const Layout: React.FC = () => {
     <Box sx={{ display: 'flex' }}>
       <CssBaseline />
 
+      {/* Skip-to-content link — visually hidden until it receives focus
+          via the keyboard, then it becomes the first stop on the page.
+          Targets the <main> region by id below. */}
+      <Box
+        component="a"
+        href="#main-content"
+        sx={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          padding: '8px 16px',
+          backgroundColor: 'primary.main',
+          color: 'primary.contrastText',
+          fontWeight: 600,
+          textDecoration: 'none',
+          zIndex: (theme) => theme.zIndex.tooltip + 1,
+          // Hidden by default — only visible when this anchor receives
+          // keyboard focus.
+          transform: 'translateY(-150%)',
+          transition: 'transform 0.15s ease',
+          '&:focus, &:focus-visible': {
+            transform: 'translateY(0)',
+            outline: '3px solid #ffffff',
+          },
+        }}
+      >
+        Skip to main content
+      </Box>
+
       {/* App Bar */}
       <AppBar
         position="fixed"
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
-          ml: drawerOpen ? `${DRAWER_WIDTH}px` : 0,
-          width: drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
+          // On mobile the drawer is a transient overlay, so the AppBar
+          // always spans the full viewport. On desktop it shrinks when
+          // the persistent drawer is open.
+          ml: !isMobile && drawerOpen ? `${DRAWER_WIDTH}px` : 0,
+          width:
+            !isMobile && drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
           transition: (theme) =>
             theme.transitions.create(['width', 'margin'], {
               easing: theme.transitions.easing.sharp,
@@ -115,6 +180,9 @@ const Layout: React.FC = () => {
             edge="start"
             onClick={() => setDrawerOpen(!drawerOpen)}
             sx={{ mr: 2 }}
+            aria-label={drawerOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={drawerOpen}
+            aria-controls="primary-navigation"
           >
             {drawerOpen ? <ChevronLeftIcon /> : <MenuIcon />}
           </IconButton>
@@ -127,10 +195,31 @@ const Layout: React.FC = () => {
           </Box>
           {user && (
             <Box display="flex" alignItems="center" gap={1}>
-              <Typography variant="body2" sx={{ opacity: 0.9 }}>
+              <Tooltip
+                title={
+                  mode === 'dark'
+                    ? t('common.switch_to_light_mode')
+                    : t('common.switch_to_dark_mode')
+                }
+              >
+                <IconButton
+                  color="inherit"
+                  onClick={toggleColorMode}
+                  aria-label={t('common.toggle_color_mode')}
+                >
+                  {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+                </IconButton>
+              </Tooltip>
+              {/* Hide the (potentially long) full-name on small screens so
+                  the AppBar doesn't push the avatar off-screen. The name
+                  is still accessible via the account menu. */}
+              <Typography
+                variant="body2"
+                sx={{ opacity: 0.9, display: { xs: 'none', sm: 'block' } }}
+              >
                 {user.full_name || user.email}
               </Typography>
-              <Tooltip title="Account">
+              <Tooltip title={t('common.account')}>
                 <IconButton color="inherit" onClick={(e) => setAnchorEl(e.currentTarget)}>
                   <Avatar
                     sx={{
@@ -164,7 +253,7 @@ const Layout: React.FC = () => {
                 </MenuItem>
                 <Divider />
                 <MenuItem onClick={handleLogout} sx={{ color: '#f57c00' }}>
-                  Logout
+                  {t('common.logout')}
                 </MenuItem>
               </Menu>
             </Box>
@@ -172,18 +261,26 @@ const Layout: React.FC = () => {
         </Toolbar>
       </AppBar>
 
-      {/* Sidebar Drawer */}
+      {/* Sidebar Drawer
+          Mobile (< md): temporary overlay, dismissed by tapping outside
+          or selecting a nav item. Desktop: persistent, pushes the
+          main canvas. Same paper colors / theme rules apply to both. */}
       <Drawer
-        variant="persistent"
+        variant={isMobile ? 'temporary' : 'persistent'}
         open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        ModalProps={{ keepMounted: true }}
+        id="primary-navigation"
+        aria-label="Primary navigation"
         sx={{
           width: DRAWER_WIDTH,
           flexShrink: 0,
           '& .MuiDrawer-paper': {
             width: DRAWER_WIDTH,
             boxSizing: 'border-box',
-            background: '#ffffff',
-            borderRight: '1px solid rgba(26, 35, 126, 0.06)',
+            backgroundColor: 'background.paper',
+            borderRight: 1,
+            borderColor: 'divider',
           },
         }}
       >
@@ -196,7 +293,7 @@ const Layout: React.FC = () => {
                 <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
                     selected={isActive(item.path)}
-                    onClick={() => navigate(item.path)}
+                    onClick={() => handleNavigate(item.path)}
                     sx={{
                       borderRadius: 2,
                       py: 1.2,
@@ -211,11 +308,11 @@ const Layout: React.FC = () => {
                         },
                       },
                       '&:hover': {
-                        background: 'rgba(26, 35, 126, 0.04)',
+                        bgcolor: 'action.hover',
                       },
                     }}
                   >
-                    <ListItemIcon sx={{ minWidth: 40, color: '#6b7280' }}>{item.icon}</ListItemIcon>
+                    <ListItemIcon sx={{ minWidth: 40, color: 'text.secondary' }}>{item.icon}</ListItemIcon>
                     <ListItemText
                       primary={item.label}
                       primaryTypographyProps={{
@@ -230,27 +327,37 @@ const Layout: React.FC = () => {
         </Box>
 
         {/* Sidebar footer */}
-        <Box sx={{ mt: 'auto', p: 2, borderTop: '1px solid rgba(26,35,126,0.06)' }}>
+        <Box sx={{ mt: 'auto', p: 2, borderTop: 1, borderColor: 'divider' }}>
           <Box display="flex" alignItems="center" justifyContent="center">
-            <img src={sabpaisaLogo} alt="SabPaisa" style={{ height: 28, opacity: 0.7 }} />
+            <img
+              src={mode === 'dark' ? sabpaisaLogoWhite : sabpaisaLogo}
+              alt="SabPaisa"
+              style={{ height: 28, opacity: 0.7 }}
+            />
           </Box>
         </Box>
       </Drawer>
 
-      {/* Main Content */}
+      {/* Main Content
+          On mobile the temporary drawer overlays this region, so the
+          canvas always spans full width and inset padding shrinks for
+          smaller viewports. */}
       <Box
+        id="main-content"
         component="main"
+        tabIndex={-1}
         sx={{
           flexGrow: 1,
-          p: 3,
-          ml: drawerOpen ? 0 : `-${DRAWER_WIDTH}px`,
-          width: drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
+          p: { xs: 1.5, sm: 2.5, md: 3 },
+          ml: !isMobile && drawerOpen ? 0 : (isMobile ? 0 : `-${DRAWER_WIDTH}px`),
+          width:
+            !isMobile && drawerOpen ? `calc(100% - ${DRAWER_WIDTH}px)` : '100%',
           transition: (theme) =>
             theme.transitions.create(['margin', 'width'], {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.leavingScreen,
             }),
-          backgroundColor: '#f8f9fc',
+          backgroundColor: 'background.default',
           minHeight: '100vh',
         }}
       >

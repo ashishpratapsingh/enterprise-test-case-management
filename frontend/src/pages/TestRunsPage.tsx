@@ -121,7 +121,7 @@ const getStatusConfig = (status: string) =>
 
 // ── Summary stat cards ────────────────────────────────────────────────────────
 const STAT_CARDS = [
-  { key: 'all', label: 'All', color: '#1a237e' },
+  { key: 'all', label: 'All', color: 'secondary.main' },
   { key: 'Not Started', label: 'TODO', color: '#6b7280' },
   { key: 'In Progress', label: 'Executing', color: '#2563eb' },
   { key: 'Blocked', label: 'Blocked', color: '#d97706' },
@@ -171,6 +171,16 @@ const TestRunsPage: React.FC = () => {
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // ── Bulk operations (JIRA-style) ───────────────────────────────────────
+  // Test runs bulk surface: Cancel (with optional shared abort reason)
+  // and Delete. No per-field metadata edit because run-level fields
+  // (name, environment) aren't typically mass-edited.
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
+  const [runBulkBusy, setRunBulkBusy] = useState(false);
+  const [runBulkDeleteConfirm, setRunBulkDeleteConfirm] = useState(false);
+  const [runBulkCancelOpen, setRunBulkCancelOpen] = useState(false);
+  const [runBulkCancelReason, setRunBulkCancelReason] = useState('');
 
   // View dialog
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
@@ -396,6 +406,76 @@ const TestRunsPage: React.FC = () => {
     }
   };
 
+  // ── Bulk handlers ────────────────────────────────────────────────────
+  const reportRunBulkResult = (
+    label: string,
+    r: { succeeded: string[]; failed: { id: string; error: string }[] },
+  ) => {
+    if (r.succeeded.length > 0) {
+      enqueueSnackbar(`${r.succeeded.length} test run(s) ${label}`, { variant: 'success' });
+    }
+    if (r.failed.length > 0) {
+      enqueueSnackbar(
+        `${r.failed.length} test run(s) skipped: ${r.failed[0].error}`,
+        { variant: 'warning' },
+      );
+    }
+  };
+
+  const handleRunBulkDelete = async () => {
+    if (selectedRunIds.length === 0) return;
+    setRunBulkBusy(true);
+    try {
+      const r = await testRunService.bulkDelete(selectedRunIds);
+      reportRunBulkResult('deleted', r);
+      setSelectedRunIds([]);
+      setRunBulkDeleteConfirm(false);
+      fetchRuns();
+    } catch {
+      enqueueSnackbar('Bulk delete failed', { variant: 'error' });
+    } finally {
+      setRunBulkBusy(false);
+    }
+  };
+
+  const openRunBulkCancel = () => {
+    setRunBulkCancelReason('');
+    setRunBulkCancelOpen(true);
+  };
+
+  // Statuses the bulk-cancel can legally transition from. Completed
+  // is terminal and Cancelled can't go straight back to Cancelled
+  // (transition table only allows Cancelled → Not Started). The
+  // backend would reject these per-row anyway; doing it client-side
+  // keeps the UX honest and avoids submitting doomed work.
+  const RUN_CANCELLABLE_STATUSES = new Set(['Not Started', 'In Progress', 'Blocked']);
+
+  const eligibleSelectedRunIds = (): string[] =>
+    selectedRunIds.filter((id) => {
+      const r = runs.find((row) => String(row.id) === String(id));
+      return !!r && RUN_CANCELLABLE_STATUSES.has(r.status);
+    });
+
+  const handleRunBulkCancelApply = async () => {
+    const eligible = eligibleSelectedRunIds();
+    if (eligible.length === 0) return;
+    setRunBulkBusy(true);
+    try {
+      const r = await testRunService.bulkCancel(
+        eligible,
+        runBulkCancelReason.trim() || undefined,
+      );
+      reportRunBulkResult('cancelled', r);
+      setSelectedRunIds([]);
+      setRunBulkCancelOpen(false);
+      fetchRuns();
+    } catch {
+      enqueueSnackbar('Bulk cancel failed', { variant: 'error' });
+    } finally {
+      setRunBulkBusy(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
@@ -494,7 +574,7 @@ const TestRunsPage: React.FC = () => {
         <Typography
           variant="body2"
           fontWeight={600}
-          sx={{ color: '#1a237e' }}
+          sx={{ color: 'secondary.main' }}
         >
           {params.value}
         </Typography>
@@ -528,7 +608,7 @@ const TestRunsPage: React.FC = () => {
       headerName: 'Test Suite',
       width: 180,
       renderCell: (params) => (
-        <Typography variant="body2" sx={{ color: '#1a237e' }}>
+        <Typography variant="body2" sx={{ color: 'secondary.main' }}>
           {getSuiteName(params.value)}
         </Typography>
       ),
@@ -543,7 +623,7 @@ const TestRunsPage: React.FC = () => {
             label={params.value}
             size="small"
             variant="outlined"
-            sx={{ fontSize: 12, borderColor: 'rgba(26,35,126,0.2)', color: '#1a237e' }}
+            sx={{ fontSize: 12, borderColor: 'rgba(26,35,126,0.2)', color: 'secondary.main' }}
           />
         ) : (
           <Typography variant="body2" color="text.secondary">
@@ -785,7 +865,14 @@ const TestRunsPage: React.FC = () => {
   return (
     <Box>
       {/* Page header */}
-      <Typography variant="h4" fontWeight={600} sx={{ color: '#1a237e', mb: 2 }}>
+      <Typography
+        variant="h4"
+        fontWeight={600}
+        sx={(theme) => ({
+          color: theme.palette.mode === 'dark' ? theme.palette.text.primary : theme.palette.secondary.main,
+          mb: 2,
+        })}
+      >
         Test Runs
       </Typography>
 
@@ -808,7 +895,7 @@ const TestRunsPage: React.FC = () => {
                 cursor: 'pointer',
                 border: '1px solid',
                 borderColor: isActive ? card.color : 'rgba(0,0,0,0.08)',
-                backgroundColor: isActive ? `${card.color}08` : '#fff',
+                backgroundColor: isActive ? `${card.color}08` : 'background.paper',
                 transition: 'all 0.15s ease',
                 minWidth: 120,
                 textAlign: 'center',
@@ -905,6 +992,63 @@ const TestRunsPage: React.FC = () => {
         </Box>
       </Box>
 
+      {/* Bulk action bar — Cancel / Delete are the only useful run-level
+          bulk ops (run metadata isn't typically mass-edited). */}
+      {userCanEdit && selectedRunIds.length > 0 && (
+        <Box
+          role="toolbar"
+          aria-label="Test run bulk actions"
+          mb={1.5}
+          px={2}
+          py={1}
+          display="flex"
+          alignItems="center"
+          gap={1.5}
+          sx={{
+            borderRadius: 2,
+            backgroundColor: 'rgba(245, 124, 0, 0.08)',
+            border: '1px solid rgba(245, 124, 0, 0.3)',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedRunIds.length} selected
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            onClick={openRunBulkCancel}
+            disabled={runBulkBusy}
+          >
+            Cancel runs…
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            onClick={() => setRunBulkDeleteConfirm(true)}
+            disabled={runBulkBusy}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button
+            size="small"
+            onClick={() => setSelectedRunIds([])}
+            disabled={runBulkBusy}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}
+      >
+        Tip: double-click a row to open run details.
+      </Typography>
       {/* AG Grid table */}
       <DataTable
         rows={runs}
@@ -913,7 +1057,11 @@ const TestRunsPage: React.FC = () => {
         loading={loading}
         paginationModel={paginationModel}
         onPaginationModelChange={setPaginationModel}
+        checkboxSelection={userCanEdit}
+        rowSelectionModel={selectedRunIds}
+        onRowSelectionModelChange={setSelectedRunIds}
         getRowId={(row) => row.id}
+        onRowDoubleClick={({ row }) => handleViewRun(row as RunRow)}
       />
 
       {/* ── Create / Edit Dialog ──────────────────────────────────────────────── */}
@@ -923,7 +1071,7 @@ const TestRunsPage: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 600, color: '#1a237e' }}>
+        <DialogTitle sx={{ fontWeight: 600, color: 'secondary.main' }}>
           {editingRun.id ? 'Edit Test Run' : 'New Test Run'}
         </DialogTitle>
         <DialogContent>
@@ -1049,6 +1197,110 @@ const TestRunsPage: React.FC = () => {
         }}
       />
 
+      {/* ── Bulk-delete confirm ─────────────────────────────────────────── */}
+      <ConfirmDialog
+        open={runBulkDeleteConfirm}
+        title={`Delete ${selectedRunIds.length} test run(s)?`}
+        message="This soft-deletes every selected test run. The action is reversible only via direct DB access."
+        confirmLabel="Delete"
+        confirmColor="error"
+        onCancel={() => setRunBulkDeleteConfirm(false)}
+        onConfirm={handleRunBulkDelete}
+      />
+
+      {/* ── Bulk-cancel dialog ─────────────────────────────────────────────
+          Cancel runs in legal states (Not Started / In Progress /
+          Blocked). Already-Completed runs are reported as failed in
+          the result snackbar, never raised — same partial-success
+          contract as the other bulk endpoints. */}
+      <Dialog
+        open={runBulkCancelOpen}
+        onClose={() => !runBulkBusy && setRunBulkCancelOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        {(() => {
+          // Pre-compute the eligibility breakdown once per render.
+          // Done (Completed) and Cancelled rows can never legally go
+          // to Cancelled, so we exclude them entirely from submission
+          // and surface the count in an Alert above the form.
+          const eligibleIds = eligibleSelectedRunIds();
+          const ineligibleRows = selectedRunIds
+            .map((id) => runs.find((row) => String(row.id) === String(id)))
+            .filter((r): r is RunRow => !!r && !RUN_CANCELLABLE_STATUSES.has(r.status));
+          return (
+            <>
+              <DialogTitle>
+                Cancel {eligibleIds.length} test run{eligibleIds.length === 1 ? '' : 's'}
+              </DialogTitle>
+              <DialogContent dividers>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Selected runs in <strong>Not Started</strong>, <strong>In Progress</strong>, or <strong>Blocked</strong> will transition to <strong>Cancelled</strong>. Runs already Done or Cancelled cannot be re-cancelled and are excluded.
+                </Typography>
+
+                {ineligibleRows.length > 0 && (
+                  <Alert
+                    severity={eligibleIds.length === 0 ? 'error' : 'warning'}
+                    sx={{ mb: 2 }}
+                  >
+                    {ineligibleRows.length} of {selectedRunIds.length} selected run{selectedRunIds.length === 1 ? '' : 's'} {ineligibleRows.length === 1 ? 'is' : 'are'} already Done or Cancelled and will be excluded:
+                    <Box component="ul" sx={{ pl: 2.5, mt: 0.5, mb: 0 }}>
+                      {ineligibleRows.slice(0, 5).map((r) => (
+                        <li key={r.id}>
+                          <Typography component="span" variant="body2">
+                            {r.name} <em>({r.status})</em>
+                          </Typography>
+                        </li>
+                      ))}
+                      {ineligibleRows.length > 5 && (
+                        <li>
+                          <Typography component="span" variant="body2" color="text.secondary">
+                            …and {ineligibleRows.length - 5} more
+                          </Typography>
+                        </li>
+                      )}
+                    </Box>
+                  </Alert>
+                )}
+
+                {eligibleIds.length === 0 ? (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    No eligible runs to cancel. Close this dialog and select at least one run that&apos;s Not Started, In Progress, or Blocked.
+                  </Alert>
+                ) : (
+                  <TextField
+                    label="Abort reason (optional)"
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    placeholder="e.g., Release scrapped, environment unavailable, …"
+                    value={runBulkCancelReason}
+                    onChange={(e) => setRunBulkCancelReason(e.target.value)}
+                    inputProps={{ maxLength: 2000 }}
+                    disabled={runBulkBusy}
+                  />
+                )}
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setRunBulkCancelOpen(false)} disabled={runBulkBusy}>
+                  Back
+                </Button>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  onClick={handleRunBulkCancelApply}
+                  disabled={runBulkBusy || eligibleIds.length === 0}
+                >
+                  {runBulkBusy
+                    ? 'Cancelling…'
+                    : `Cancel ${eligibleIds.length} run${eligibleIds.length === 1 ? '' : 's'}`}
+                </Button>
+              </DialogActions>
+            </>
+          );
+        })()}
+      </Dialog>
+
       {/* ── Abort Reason Dialog ───────────────────────────────────────────────── */}
       <Dialog
         open={abortDialogOpen}
@@ -1095,7 +1347,7 @@ const TestRunsPage: React.FC = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 700, color: '#1a237e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <DialogTitle sx={{ fontWeight: 700, color: 'secondary.main', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box>
             Test Run Details
             {viewRun && (
@@ -1113,7 +1365,11 @@ const TestRunsPage: React.FC = () => {
               />
             )}
           </Box>
-          <IconButton size="small" onClick={() => setViewDialogOpen(false)}>
+          <IconButton
+            size="small"
+            onClick={() => setViewDialogOpen(false)}
+            aria-label="Close"
+          >
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -1213,7 +1469,7 @@ const TestRunsPage: React.FC = () => {
                     const progressPct = total > 0 ? (executed / total) * 100 : 0;
 
                     const stats = [
-                      { label: 'Total', count: total, color: '#1a237e', icon: null },
+                      { label: 'Total', count: total, color: 'secondary.main', icon: null },
                       { label: 'Passed', count: passCount, color: '#4caf50', icon: <CheckCircle sx={{ fontSize: 18 }} /> },
                       { label: 'Failed', count: failCount, color: '#f44336', icon: <CancelIcon sx={{ fontSize: 18 }} /> },
                       { label: 'Blocked', count: blockedCount, color: '#ff9800', icon: <BlockIcon sx={{ fontSize: 18 }} /> },
@@ -1223,7 +1479,7 @@ const TestRunsPage: React.FC = () => {
 
                     return (
                       <>
-                        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: '#1a237e' }}>
+                        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: 'secondary.main' }}>
                           Execution Summary
                         </Typography>
 
@@ -1302,7 +1558,7 @@ const TestRunsPage: React.FC = () => {
                   {viewExecs.length > 0 && (
                     <>
                       <Divider sx={{ my: 2 }} />
-                      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: '#1a237e' }}>
+                      <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1, color: 'secondary.main' }}>
                         Test Case Results
                       </Typography>
                       <TableContainer sx={{ maxHeight: 500, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
@@ -1352,7 +1608,10 @@ const TestRunsPage: React.FC = () => {
                                     onClick={() => setExpandedExecId(isExpanded ? null : exec.id)}
                                   >
                                     <TableCell sx={{ width: 40 }}>
-                                      <IconButton size="small">
+                                      <IconButton
+                                        size="small"
+                                        aria-label={isExpanded ? 'Collapse step results' : 'Expand step results'}
+                                      >
                                         {isExpanded ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
                                       </IconButton>
                                     </TableCell>
@@ -1455,7 +1714,7 @@ const TestRunsPage: React.FC = () => {
 
                                           {/* Steps detail */}
                                           {steps.length > 0 ? (
-                                            <Table size="small" sx={{ bgcolor: '#fff', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                                            <Table size="small" sx={{ bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
                                               <TableHead>
                                                 <TableRow>
                                                   <TableCell sx={{ fontWeight: 700, bgcolor: '#fafafa', width: 60 }}>Step</TableCell>
