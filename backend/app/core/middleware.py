@@ -482,3 +482,43 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
 
         return response
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Stamp every request with a unique ID and propagate it through
+    logs + the response.
+
+    - Reads ``X-Request-ID`` from the incoming request when the
+      caller already supplied one (e.g. an upstream proxy / load
+      balancer); otherwise generates a fresh UUID.
+    - Stores the id on a ``ContextVar`` so every log line emitted
+      while processing the request carries it without each call site
+      having to remember to pass it.
+    - Echoes it back on the response so external trace tools can
+      correlate client-side events to server logs.
+
+    Register this middleware **first** (i.e. last on the
+    ``app.add_middleware`` chain) so the id is in scope for everything
+    downstream — auth, audit, body parsing.
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        import uuid as _uuid
+
+        from app.core.request_context import request_id_var
+
+        incoming = request.headers.get("X-Request-ID", "").strip()
+        # Bound length to avoid log-injection / huge headers.
+        if incoming and len(incoming) <= 128:
+            request_id = incoming
+        else:
+            request_id = _uuid.uuid4().hex
+
+        token = request_id_var.set(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_var.reset(token)
+
+        response.headers["X-Request-ID"] = request_id
+        return response

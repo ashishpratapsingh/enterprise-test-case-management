@@ -1,22 +1,33 @@
+# Production-shaped Compose stack.
+#
+# - The backend image is run **as built** — no source bind-mount, so
+#   the non-root user inside the container actually owns the code.
+# - Required env vars don't have placeholder defaults — Compose will
+#   refuse to start if the operator forgot to set them. (The app
+#   itself also refuses to boot with a placeholder SECRET_KEY when
+#   DEBUG=false.)
+# - For local development the companion ``docker-compose.override.yml``
+#   layers on bind mounts + relaxed env defaults; ``docker compose up``
+#   merges both files automatically. Use
+#   ``docker compose -f docker-compose.yml up`` to skip the override.
 version: "3.9"
 
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: tcm_user
-      POSTGRES_PASSWORD: tcm_pass
-      POSTGRES_DB: tcm_db
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tcm_user -d tcm_db"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
+    # ports: not exposed in prod; only the backend talks to the DB.
 
   backend:
     build: ./backend
@@ -27,15 +38,46 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://tcm_user:tcm_pass@db:5432/tcm_db
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:80}
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Critical: no default. App refuses to start with placeholder SECRET_KEY in prod.
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (openssl rand -hex 32)}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
+      APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      # Mail
+      MAIL_BACKEND: ${MAIL_BACKEND:-smtp}
+      MAIL_FROM: ${MAIL_FROM:-noreply@example.com}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      # Integrations (all optional)
       JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_USER_EMAIL: ${JIRA_USER_EMAIL:-}
       JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
-      BITBUCKET_BASE_URL: ${BITBUCKET_BASE_URL:-}
-      BITBUCKET_API_TOKEN: ${BITBUCKET_API_TOKEN:-}
+      JIRA_DEFAULT_PROJECT_KEY: ${JIRA_DEFAULT_PROJECT_KEY:-}
+      GITHUB_BASE_URL: ${GITHUB_BASE_URL:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_DEFAULT_REPO: ${GITHUB_DEFAULT_REPO:-}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-SSO}
+      OIDC_DEFAULT_ROLE_NAME: ${OIDC_DEFAULT_ROLE_NAME:-Viewer}
+      # Error reporting
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     volumes:
-      - ./backend:/app
+      # Persist uploads + logs across restarts. Code is NOT mounted —
+      # the image is the source of truth.
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
 
   frontend:
     build: ./frontend
@@ -43,7 +85,12 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      # Container listens on 8080 (unprivileged nginx); expose as 80
+      # at the host. Put TLS termination + a real LB in front of this
+      # for any internet-facing deployment.
+      - "80:8080"
 
 volumes:
   postgres_data:
+  backend_uploads:
+  backend_logs:

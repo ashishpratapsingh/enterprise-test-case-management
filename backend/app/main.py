@@ -18,6 +18,7 @@ from app.core.logging_config import setup_logging
 from app.core.middleware import (
     AuditMiddleware,
     RateLimitMiddleware,
+    RequestIDMiddleware,
     SecurityHeadersMiddleware,
 )
 from app.core.response import success_response
@@ -70,9 +71,13 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # --- Middleware (execution order is bottom-to-top) ---
+    # RequestIDMiddleware is registered LAST here, which means it
+    # executes FIRST on the way in — so the request_id is in scope
+    # for every other middleware's logs.
     app.add_middleware(AuditMiddleware)
     app.add_middleware(RateLimitMiddleware, rate_per_minute=settings.RATE_LIMIT_PER_MINUTE)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,

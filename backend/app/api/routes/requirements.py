@@ -1,12 +1,11 @@
 """Requirement management routes."""
 
-
-
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
 from app.services.requirement_service import RequirementService
+from app.utils.helpers import build_filters
 
 router = APIRouter(prefix="/requirements", tags=["Requirements"])
 
@@ -22,13 +21,20 @@ async def list_requirements(
     search: str | None = Query(default=None, description="Search by title or description"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    sort_by: str = Query(default="created_at"),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """List requirements with optional project filter and search."""
     service = RequirementService(db)
+    filters = build_filters(project_id=project_id, search=search)
     result = await service.list_requirements(
-        project_id=project_id, search=search, page=page, page_size=page_size
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        filters=filters or None,
     )
     return success_response(data=result, message="Requirements retrieved successfully")
 
@@ -40,15 +46,16 @@ async def list_requirements(
     summary="Create requirement",
 )
 async def create_requirement(
-    requirement_data: dict,
+    payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Create a new requirement."""
+    # Requirement model has no ``created_by`` column — leave the
+    # payload alone. ``current_user`` is consumed only for the auth
+    # check.
     service = RequirementService(db)
-    requirement = await service.create_requirement(
-        requirement_data=requirement_data, created_by=current_user["id"]
-    )
+    requirement = await service.create_requirement(data=payload)
     return success_response(data=requirement, message="Requirement created successfully")
 
 
@@ -77,16 +84,14 @@ async def get_requirement(
 )
 async def update_requirement(
     requirement_id: str,
-    requirement_data: dict,
+    payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Update an existing requirement."""
     service = RequirementService(db)
     requirement = await service.update_requirement(
-        requirement_id=requirement_id,
-        requirement_data=requirement_data,
-        updated_by=current_user["id"],
+        requirement_id=requirement_id, data=payload
     )
     return success_response(data=requirement, message="Requirement updated successfully")
 
@@ -104,9 +109,7 @@ async def delete_requirement(
 ) -> dict:
     """Soft delete a requirement."""
     service = RequirementService(db)
-    await service.delete_requirement(
-        requirement_id=requirement_id, deleted_by=current_user["id"]
-    )
+    await service.delete_requirement(requirement_id=requirement_id)
     return success_response(message="Requirement deleted successfully")
 
 
@@ -118,36 +121,37 @@ async def delete_requirement(
 )
 async def get_requirements_by_project(
     project_id: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Get all requirements for a specific project."""
     service = RequirementService(db)
-    result = await service.list_requirements(
-        project_id=project_id, page=page, page_size=page_size
-    )
-    return success_response(data=result, message="Requirements retrieved successfully")
+    items = await service.list_requirements_by_project(project_id=project_id)
+    return success_response(data=items, message="Requirements retrieved successfully")
 
 
 @router.post(
     "/{requirement_id}/link-jira",
     response_model=None,
     status_code=status.HTTP_200_OK,
-    summary="Link requirement to JIRA issue",
+    summary="Link requirement to a JIRA issue (or any external tracker)",
 )
 async def link_to_jira(
     requirement_id: str,
-    jira_data: dict,
+    jira_data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    """Link a requirement to a JIRA issue for traceability."""
+    """Link a requirement to an external tracker key (e.g. a JIRA
+    issue key) for traceability."""
+    external_id = jira_data.get("jira_issue_key") or jira_data.get("external_id")
+    if not external_id:
+        from app.core.exceptions import ValidationError
+        raise ValidationError(
+            "Provide either 'jira_issue_key' or 'external_id' in the body"
+        )
     service = RequirementService(db)
-    result = await service.link_to_jira(
-        requirement_id=requirement_id,
-        jira_issue_key=jira_data["jira_issue_key"],
-        linked_by=current_user["id"],
+    result = await service.link_external_id(
+        requirement_id=requirement_id, external_id=external_id
     )
-    return success_response(data=result, message="Requirement linked to JIRA successfully")
+    return success_response(data=result, message="Requirement linked successfully")

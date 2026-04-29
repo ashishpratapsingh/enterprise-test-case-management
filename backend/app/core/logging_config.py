@@ -8,6 +8,7 @@ import sys
 from datetime import datetime, timezone
 
 from app.core.config import get_settings
+from app.core.request_context import RequestIDFilter
 
 settings = get_settings()
 
@@ -48,11 +49,13 @@ def setup_logging() -> None:
     root_logger.handlers.clear()
 
     json_formatter = JSONFormatter()
+    request_id_filter = RequestIDFilter()
 
     # --- Console handler ---
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(json_formatter)
     console_handler.setLevel(logging.DEBUG)
+    console_handler.addFilter(request_id_filter)
     root_logger.addHandler(console_handler)
 
     # --- File handler (rotating) ---
@@ -68,6 +71,7 @@ def setup_logging() -> None:
     )
     file_handler.setFormatter(json_formatter)
     file_handler.setLevel(logging.DEBUG)
+    file_handler.addFilter(request_id_filter)
     root_logger.addHandler(file_handler)
 
     # Quiet noisy third-party loggers

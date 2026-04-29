@@ -13,11 +13,39 @@ concurrency:
 
 jobs:
   # ────────────────────────────────────────────────────────────────────────
-  # Backend — pytest + coverage floor
+  # Backend — pytest + coverage floor on a SQLite + Postgres matrix.
+  #
+  # Why two DBs? The app supports both via SQLAlchemy + dialect-aware
+  # SQL, and we've been bitten before by Postgres-only constructs
+  # (date_trunc, INTERVAL casts) that pass on dev SQLite but explode
+  # in prod. Running both keeps that whole bug class out of the
+  # codebase.
   # ────────────────────────────────────────────────────────────────────────
   backend:
-    name: Backend (pytest)
+    name: Backend (pytest, ${{ matrix.dbname }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dbname: sqlite
+            database_url: ""  # use the app's SQLite default
+          - dbname: postgres
+            database_url: postgresql+asyncpg://tcm_user:tcm_pass@localhost:5432/tcm_db
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tcm_user
+          POSTGRES_PASSWORD: tcm_pass
+          POSTGRES_DB: tcm_db
+        options: >-
+          --health-cmd "pg_isready -U tcm_user -d tcm_db"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 5432:5432
     defaults:
       run:
         working-directory: backend
@@ -36,33 +64,34 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # pytest-cov is already in requirements; install pyflakes for the lint pass.
-          pip install pyflakes
+          pip install pyflakes pip-audit
 
       - name: Lint (pyflakes — unused imports / undefined names)
-        # Non-fatal: the models use forward refs that pyflakes misreads as
-        # "undefined name"; keep this informational until we suppress those.
         continue-on-error: true
         run: python -m pyflakes app/ | grep "imported but unused" || true
 
+      - name: Dependency CVE audit (informational)
+        continue-on-error: true
+        run: pip-audit -r requirements.txt --strict || true
+
       - name: Run tests with coverage
         env:
-          # Match the app's dev defaults so RateLimitMiddleware is bypassed,
-          # matching local test behaviour.
           DEBUG: "true"
           SECRET_KEY: "ci-only-ephemeral-secret-not-for-production-use"
+          # Empty value falls through to the app's SQLite default.
+          DATABASE_URL: ${{ matrix.database_url }}
         run: |
           pytest -q \
             --cov=app \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=60
+            --cov-fail-under=70
 
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage
+          name: backend-coverage-${{ matrix.dbname }}
           path: backend/coverage.xml
           retention-days: 7
 
@@ -88,6 +117,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Dependency CVE audit (informational)
+        continue-on-error: true
+        run: npm audit --omit=dev || true
 
       - name: Type-check
         run: npx tsc --noEmit

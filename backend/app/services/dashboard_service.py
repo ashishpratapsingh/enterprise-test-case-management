@@ -139,32 +139,44 @@ class DashboardService:
     ) -> list[dict[str, Any]]:
         """Get daily execution counts for the past N days.
 
-        Returns:
-            List of dicts with date, passed, failed, and total counts.
+        Returns a list of ``{date, passed, failed, total}`` dicts, one
+        row per calendar day with executions, ordered ascending.
+
+        Implementation notes
+        --------------------
+        Earlier versions of this query used Postgres-only constructs
+        (``func.cast("N days", type_=None)``) which crashed on SQLite.
+        It also used the wrong status string ("Passed" / "Failed"
+        instead of the canonical "Pass" / "Fail" defined on the
+        TestExecution model). Both bugs are fixed here:
+
+        - The cutoff is computed in Python and passed as a bound
+          parameter, so any DB dialect that understands ``>=`` on a
+          timestamp works.
+        - Status comparisons use the model's canonical values.
+        - Day grouping uses ``func.date(...)`` which is supported by
+          Postgres + SQLite + MySQL.
         """
+        from datetime import datetime, timedelta
+
         from app.models.test_execution import TestExecution as Execution
         from app.models.test_case import TestCase
 
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        day = func.date(Execution.created_at)
+
         stmt = (
             select(
-                func.date(Execution.created_at).label("date"),
+                day.label("date"),
                 func.count(Execution.id).label("total"),
-                func.sum(
-                    case((Execution.status == "Passed", 1), else_=0)
-                ).label("passed"),
-                func.sum(
-                    case((Execution.status == "Failed", 1), else_=0)
-                ).label("failed"),
+                func.sum(case((Execution.status == "Pass", 1), else_=0)).label("passed"),
+                func.sum(case((Execution.status == "Fail", 1), else_=0)).label("failed"),
             )
             .join(TestCase, TestCase.id == Execution.test_case_id)
             .where(TestCase.project_id == project_id)
-            .where(
-                Execution.created_at >= func.now() - func.cast(
-                    f"{days} days", type_=None
-                )
-            )
-            .group_by(func.date(Execution.created_at))
-            .order_by(func.date(Execution.created_at))
+            .where(Execution.created_at >= cutoff)
+            .group_by(day)
+            .order_by(day)
         )
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -172,7 +184,7 @@ class DashboardService:
         return [
             {
                 "date": str(row.date),
-                "total": row.total,
+                "total": row.total or 0,
                 "passed": row.passed or 0,
                 "failed": row.failed or 0,
             }
@@ -234,17 +246,17 @@ class DashboardService:
         from app.models.test_execution import TestExecution as Execution
         from app.models.test_run import TestRun
 
-        # Get all executions for runs tied to this release
+        # Get all executions for runs tied to this release. Status
+        # values match the canonical ``Pass / Fail / Blocked / Skipped
+        # / Not Run`` set defined on the TestExecution model.
         exec_stmt = (
             select(
                 func.count(Execution.id).label("total"),
                 func.sum(
-                    case((Execution.status == "Passed", 1), else_=0)
+                    case((Execution.status == "Pass", 1), else_=0)
                 ).label("passed"),
                 func.sum(
-                    case(
-                        (Execution.status == "Not Executed", 1), else_=0
-                    )
+                    case((Execution.status == "Not Run", 1), else_=0)
                 ).label("not_executed"),
             )
             .join(TestRun, TestRun.id == Execution.test_run_id)
@@ -263,10 +275,16 @@ class DashboardService:
         )
         pass_rate = round((passed / executed * 100) if executed > 0 else 0.0, 2)
 
-        # Count open defects linked to this release
+        # Count open defects linked to this release. Defect doesn't
+        # carry a ``release_id`` column directly — the link is
+        # transitive through the execution it was raised against:
+        #   Defect → test_execution_id → TestExecution.test_run_id →
+        #   TestRun.release_id
         defect_stmt = (
             select(func.count(Defect.id))
-            .where(Defect.release_id == release_id)
+            .join(Execution, Execution.id == Defect.test_execution_id)
+            .join(TestRun, TestRun.id == Execution.test_run_id)
+            .where(TestRun.release_id == release_id)
             .where(Defect.is_deleted == False)  # noqa: E712
             .where(Defect.status.in_(["Open", "In Progress", "Reopened"]))
         )

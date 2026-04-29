@@ -1,12 +1,11 @@
 """Release management routes."""
 
-
-
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, get_db, success_response
 from app.services.release_service import ReleaseService
+from app.utils.helpers import build_filters
 
 router = APIRouter(prefix="/releases", tags=["Releases"])
 
@@ -19,19 +18,25 @@ router = APIRouter(prefix="/releases", tags=["Releases"])
 )
 async def list_releases(
     project_id: str | None = Query(default=None, description="Filter by project ID"),
-    release_status: str | None = Query(default=None, description="Filter by status"),
+    release_status: str | None = Query(
+        default=None, alias="status", description="Filter by status"
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    sort_by: str = Query(default="created_at"),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """List releases with optional project and status filters."""
     service = ReleaseService(db)
+    filters = build_filters(project_id=project_id, status=release_status)
     result = await service.list_releases(
-        project_id=project_id,
-        release_status=release_status,
         page=page,
         page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        filters=filters or None,
     )
     return success_response(data=result, message="Releases retrieved successfully")
 
@@ -43,15 +48,15 @@ async def list_releases(
     summary="Create release",
 )
 async def create_release(
-    release_data: dict,
+    payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Create a new release for a project."""
+    # Release model has no ``created_by`` column — leave the payload
+    # alone. ``current_user`` is consumed only for the auth check.
     service = ReleaseService(db)
-    release = await service.create_release(
-        release_data=release_data, created_by=current_user["id"]
-    )
+    release = await service.create_release(data=payload)
     return success_response(data=release, message="Release created successfully")
 
 
@@ -80,15 +85,13 @@ async def get_release(
 )
 async def update_release(
     release_id: str,
-    release_data: dict,
+    payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Update an existing release."""
     service = ReleaseService(db)
-    release = await service.update_release(
-        release_id=release_id, release_data=release_data, updated_by=current_user["id"]
-    )
+    release = await service.update_release(release_id=release_id, data=payload)
     return success_response(data=release, message="Release updated successfully")
 
 
@@ -105,7 +108,7 @@ async def delete_release(
 ) -> dict:
     """Soft delete a release."""
     service = ReleaseService(db)
-    await service.delete_release(release_id=release_id, deleted_by=current_user["id"])
+    await service.delete_release(release_id=release_id)
     return success_response(message="Release deleted successfully")
 
 
@@ -117,17 +120,13 @@ async def delete_release(
 )
 async def get_releases_by_project(
     project_id: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Get all releases for a specific project."""
     service = ReleaseService(db)
-    result = await service.list_releases(
-        project_id=project_id, page=page, page_size=page_size
-    )
-    return success_response(data=result, message="Releases retrieved successfully")
+    items = await service.list_releases_by_project(project_id=project_id)
+    return success_response(data=items, message="Releases retrieved successfully")
 
 
 @router.post(
@@ -138,15 +137,13 @@ async def get_releases_by_project(
 )
 async def transition_release_status(
     release_id: str,
-    transition_data: dict,
+    transition_data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    """Transition a release to a new status (e.g., planned -> in_progress -> released)."""
+    """Transition a release to a new status (e.g., Planned → In Progress → Released)."""
     service = ReleaseService(db)
     release = await service.transition_status(
-        release_id=release_id,
-        new_status=transition_data["status"],
-        transitioned_by=current_user["id"],
+        release_id=release_id, new_status=transition_data["status"]
     )
     return success_response(data=release, message="Release status updated successfully")

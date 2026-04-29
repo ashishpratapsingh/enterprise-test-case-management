@@ -24,7 +24,7 @@ async def get_test_coverage(
 ) -> dict:
     """Get test coverage metrics grouped by requirement."""
     service = DashboardService(db)
-    result = await service.get_test_coverage(project_id=project_id)
+    result = await service.test_coverage_by_requirement(project_id=project_id)
     return success_response(data=result, message="Test coverage retrieved successfully")
 
 
@@ -41,10 +41,12 @@ async def get_pass_fail_ratio(
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """Get the pass/fail ratio for test executions."""
+    # release_id is accepted for backwards compat but not yet used by
+    # the service — wiring it in needs a join through TestRun. Logged
+    # as a known gap; not blocking the rest of the dashboard.
+    _ = release_id  # noqa: F841 — intentional, see comment above
     service = DashboardService(db)
-    result = await service.get_pass_fail_ratio(
-        project_id=project_id, release_id=release_id
-    )
+    result = await service.pass_fail_ratio(project_id=project_id)
     return success_response(data=result, message="Pass/fail ratio retrieved successfully")
 
 
@@ -61,7 +63,7 @@ async def get_automation_coverage(
 ) -> dict:
     """Get the percentage of test cases that are automated vs manual."""
     service = DashboardService(db)
-    result = await service.get_automation_coverage(project_id=project_id)
+    result = await service.automation_coverage(project_id=project_id)
     return success_response(data=result, message="Automation coverage retrieved successfully")
 
 
@@ -79,7 +81,7 @@ async def get_execution_trend(
 ) -> dict:
     """Get test execution trends over a specified time period."""
     service = DashboardService(db)
-    result = await service.get_execution_trend(project_id=project_id, days=days)
+    result = await service.execution_trend(project_id=project_id, days=days)
     return success_response(data=result, message="Execution trend retrieved successfully")
 
 
@@ -96,7 +98,7 @@ async def get_defect_density(
 ) -> dict:
     """Get defect density metrics (defects per module/requirement)."""
     service = DashboardService(db)
-    result = await service.get_defect_density(project_id=project_id)
+    result = await service.defect_density(project_id=project_id)
     return success_response(data=result, message="Defect density retrieved successfully")
 
 
@@ -114,5 +116,5 @@ async def get_release_readiness(
     """Calculate and return a release readiness score based on test execution results,
     defect status, and requirement coverage."""
     service = DashboardService(db)
-    result = await service.get_release_readiness(release_id=release_id)
+    result = await service.release_readiness_score(release_id=release_id)
     return success_response(data=result, message="Release readiness retrieved successfully")

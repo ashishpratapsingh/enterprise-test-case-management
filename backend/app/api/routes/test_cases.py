@@ -207,16 +207,30 @@ async def approve_test_case(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    """Approve or reject a test case in the approval workflow.
+    """Approve or reject a test case via the workflow.
 
-    Expected approval_data: {"action": "approve" | "reject", "comment": "optional comment"}
+    Body: ``{"action": "approve" | "reject" | "ready", "comment": "..."}``.
+    Maps to the service's ``transition_approval`` (which validates the
+    Draft → Ready → Approved table). ``comment`` is currently ignored —
+    the service has no per-transition comment field; add the audit
+    trail there if you need it.
     """
+    action = (approval_data.get("action") or "").lower()
+    target = {
+        "approve": "Approved",
+        "approved": "Approved",
+        "ready": "Ready",
+        "reject": "Draft",
+        "draft": "Draft",
+    }.get(action)
+    if target is None:
+        from app.core.exceptions import ValidationError
+        raise ValidationError(
+            f"Unknown approval action '{action}'. Use one of: approve, ready, reject."
+        )
     service = TestCaseService(db)
-    result = await service.process_approval(
-        test_case_id=test_case_id,
-        action=approval_data["action"],
-        comment=approval_data.get("comment"),
-        approved_by=current_user["id"],
+    result = await service.transition_approval(
+        test_case_id=test_case_id, new_status=target
     )
     return success_response(data=result, message="Approval processed successfully")
 
